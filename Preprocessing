@@ -1,0 +1,630 @@
+# -*- coding: utf-8 -*-
+"""
+Written by Hugues Lamothe
+Article: A Widespread Central EEG Cluster Associated with Obsessions Revealed 
+By A Semi-Naturalistic Symptom Provocation Paradigm
+"""
+
+# =============================================================================
+# IMPORTS
+# %%===========================================================================
+import os
+import mne
+from mne.preprocessing import ICA
+from mne_icalabel import label_components
+from autoreject import AutoReject
+# =============================================================================
+
+# =============================================================================
+# GENERAL PARAMETERS
+# %%===========================================================================
+Subject = "PatientID"
+FolderPath = f"Path1{Subject}"
+Index = "PatientIndex"
+FilePath = FolderPath + Subject + Index + ".vhdr"
+
+SaveRoot = f"Path2{Subject}"
+
+LFreq = 1
+HFreq = 30
+Tmin = -0.2
+Tmax = 3
+TargetSFreq = 250
+
+ICA_N_COMPONENTS = 30
+ICA_METHOD = "picard"
+ICA_RANDOM_STATE = 97
+ICA_MAX_ITER = "auto"
+ICA_FIT_PARAMS = None
+
+Event_ID = {
+    "Stimulus/S  4": 4,
+    "Stimulus/S 13": 13,
+    "Stimulus/S 24": 24,
+    "Stimulus/S 23": 23
+}
+
+ERRORSubjects = ["PatientID", "PatientID"]
+
+PRISMESubjects = [
+    "PatientID", "PatientID", "PatientID", "PatientID",
+    "PatientID", "PatientID", "PatientID", "PatientID",
+    "PatientID", "PatientID", "PatientID", "PatientID"
+]
+# =============================================================================
+
+# =============================================================================
+# 1) LOAD RAW DATA
+# %%===========================================================================
+RawData = mne.io.read_raw_brainvision(FilePath, preload=True)
+print("Raw loaded")
+# =============================================================================
+
+# =============================================================================
+# 2) SHAPING RAW DATA
+# %%===========================================================================
+for Patient in ERRORSubjects:
+    if Patient in Subject:
+        if Patient == "PatientID":
+            RawData.rename_channels({"AF1": "AF7", "AF2": "AF3"})
+        elif Patient == "PatientID":
+            RawData.rename_channels({"CZ": "Cz", "EOGD": "EOGR"})
+
+for Patient in PRISMESubjects:
+    if Patient in Subject:
+        RawData.drop_channels([
+            'EOGL', 'EOGR', '68', '69', '70', '71', '72', '73', '74', '75',
+            '76', '77', '78', '79', '80', '81', '82', '83', '84', '85',
+            '86', '87', '88', '89', '90', '91', '92', '93', '94', '95', '96'
+        ])
+        RawData.set_channel_types({"EKG": "ecg"})
+
+mne.add_reference_channels(RawData, "Fz", copy=False)
+
+RawData.set_montage("easycap-M1", on_missing="ignore")
+
+FigSensors = RawData.plot_sensors(show_names=True)
+FigSensors.savefig(
+    os.path.join(SaveRoot, f"{Subject}_sensors.png"),
+    dpi=300,
+    bbox_inches="tight"
+)
+
+RawData.set_eeg_reference(["CPz"], projection=False)
+
+FigRaw = RawData.plot(title="Original Signal", show=False)
+# =============================================================================
+
+# =============================================================================
+# 3) REST RE-REFERENCE
+# %%===========================================================================
+Sphere = mne.make_sphere_model("auto", "auto", RawData.info)
+Source = mne.setup_volume_source_space(
+    sphere=Sphere,
+    exclude=30.0,
+    pos=5.0,
+    mri=None
+)
+Forward = mne.make_forward_solution(
+    RawData.info,
+    trans=None,
+    src=Source,
+    bem=Sphere
+)
+
+RawData_RESTed = RawData.copy().set_eeg_reference("REST", forward=Forward)
+# =============================================================================
+
+# =============================================================================
+# 4) FILTERING
+# %%===========================================================================
+RawData_HighLowPassed = RawData_RESTed.filter(l_freq=LFreq, h_freq=HFreq)
+
+RawData_HighLowPassed.resample(TargetSFreq, npad="auto")
+print(f"Data resampled to {TargetSFreq} Hz")
+
+FigFiltered = RawData_HighLowPassed.plot(
+    title="High- and Low-passed Signal",
+    show=False
+)
+
+
+if HFreq < 50:
+    RawData_Notched = RawData_HighLowPassed
+else:
+    RawData_Notched = RawData_HighLowPassed.notch_filter(
+        freqs=[50],
+        picks="data",
+        method="spectrum_fit"
+    )
+
+FigNotched = RawData_Notched.plot(title="Notched Signal", show=False)
+# =============================================================================
+
+# =============================================================================
+# 5) EPOCHING
+# %%===========================================================================
+Events_from_annot, Event_dict = mne.events_from_annotations(RawData_Notched)
+
+Epochs = mne.Epochs(
+    RawData_Notched,
+    events=Events_from_annot,
+    tmin=Tmin,
+    tmax=Tmax,
+    baseline=None,
+    preload=True,
+    event_id=Event_ID
+)
+
+FigEpochs = Epochs.plot(show=False)
+# =============================================================================
+
+# =============================================================================
+# =============================================================================
+# 6) BAD EPOCH REJECTION BEFORE ICA
+# %%===========================================================================
+NumberEpochsBeforeRejection = len(Epochs)
+print("Number of epochs before bad epoch rejection:", NumberEpochsBeforeRejection)
+
+# -------------------------------
+# 6a) AUTOREJECT (NO INTERPOLATION)
+# -------------------------------
+AR = AutoReject(
+    n_interpolate=[0],
+    consensus=[0.66],
+    random_state=42,
+    n_jobs=-1,
+    verbose=True
+)
+
+Epochs_clean, RejectLog = AR.fit_transform(Epochs, return_log=True)
+
+print("AutoReject done (NO interpolation)")
+
+# Rejected Indices by AutoReject
+RejectedEpochIndices_AutoReject = [
+    i for i, bad in enumerate(RejectLog.bad_epochs) if bad
+]
+
+print("Rejected epochs indices (AutoReject):", RejectedEpochIndices_AutoReject)
+print("Number of rejected epochs (AutoReject):", len(RejectedEpochIndices_AutoReject))
+print("Number of epochs after AutoReject:", len(Epochs_clean))
+
+# Saving of the AutoReject Model
+AR.save(
+    os.path.join(SaveRoot, f"{Subject}_autoreject_nointerp.h5"),
+    overwrite=True
+)
+
+# -------------------------------
+# 6b) MANUAL VISUAL REJECTION
+# -------------------------------
+Epochs = Epochs_clean.copy()
+
+NumberEpochsBeforeManualRejection = len(Epochs)
+print("Number of epochs before manual visual rejection:", NumberEpochsBeforeManualRejection)
+
+print("Visual inspection window opening...")
+print("Mark bad epochs manually, then close the figure to continue.")
+
+Epochs.plot(block=True)
+
+# Manually Rejected Epochs
+RejectedEpochIndices_Manual = [
+    i for i, DL in enumerate(Epochs.drop_log) if len(DL) > 0
+]
+
+print("Rejected epochs indices (manual visual rejection):", RejectedEpochIndices_Manual)
+print("Number of rejected epochs (manual visual rejection):", len(RejectedEpochIndices_Manual))
+print("Number of epochs after manual visual rejection:", len(Epochs))
+
+FigEpochsAfterReject = Epochs.plot(show=False)
+# =============================================================================
+
+# =============================================================================
+# 7) ICA #1 : BEFORE INTERPOLATION - BAD CHANNEL IDENTIFICATION
+# %%===========================================================================
+ICA_1 = ICA(
+    n_components=ICA_N_COMPONENTS,
+    method=ICA_METHOD,
+    random_state=ICA_RANDOM_STATE,
+    max_iter=ICA_MAX_ITER,
+    fit_params=ICA_FIT_PARAMS
+)
+ICA_1.fit(Epochs)
+
+FigICA1 = ICA_1.plot_components(
+    picks=range(30),
+    nrows=5,
+    ncols=6,
+    show=False
+    )
+
+if isinstance(FigICA1, list):
+    for i, Fig in enumerate(FigICA1):
+        Fig.savefig(
+            os.path.join(SaveRoot, f"{Subject}_ICA1_before_interpolation_page_{i+1}.png"),
+            dpi=300,
+            bbox_inches="tight"
+        )
+else:
+    FigICA1.savefig(
+        os.path.join(SaveRoot, f"{Subject}_ICA1_before_interpolation.png"),
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+ICA_1.save(
+    os.path.join(SaveRoot, f"{Subject}_ICA1_before_interpolation-ica.fif"),
+    overwrite=True
+)
+# =============================================================================
+
+# =============================================================================
+# 8) CHOOSE CHANNELS TO INTERPOLATE AFTER LOOKING AT ICA #1
+# %%===========================================================================
+CHANNELS_TO_INTERPOLATE = ["FT10", "F8"] # TO FILL
+
+Epochs_Interp = Epochs.copy()
+
+ExistingChannelsToInterpolate = [
+    ch for ch in CHANNELS_TO_INTERPOLATE if ch in Epochs_Interp.ch_names
+]
+
+Epochs_Interp.info["bads"] = list(
+    set(Epochs_Interp.info["bads"] + ExistingChannelsToInterpolate)
+)
+
+if len(ExistingChannelsToInterpolate) > 0:
+    Epochs_Interp.interpolate_bads(reset_bads=True, verbose=False)
+    Epochs_Interp.set_eeg_reference("average", verbose=False)
+
+print("Interpolated channels:", ExistingChannelsToInterpolate)
+# =============================================================================
+
+# =============================================================================
+# 9) ICA #2 : AFTER INTERPOLATION
+# %%===========================================================================
+ICA_2 = ICA(
+    n_components=ICA_N_COMPONENTS,
+    method=ICA_METHOD,
+    random_state=ICA_RANDOM_STATE,
+    max_iter=ICA_MAX_ITER,
+    fit_params=ICA_FIT_PARAMS
+)
+ICA_2.fit(Epochs_Interp)
+
+FigICA2 = ICA_2.plot_components(
+    picks=range(30),
+    nrows=5,
+    ncols=6,
+    show=False
+    )
+
+if isinstance(FigICA2, list):
+    for i, Fig in enumerate(FigICA2):
+        Fig.savefig(
+            os.path.join(SaveRoot, f"{Subject}_ICA2_after_interpolation_page_{i+1}.png"),
+            dpi=300,
+            bbox_inches="tight"
+        )
+else:
+    FigICA2.savefig(
+        os.path.join(SaveRoot, f"{Subject}_ICA2_after_interpolation.png"),
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+ICA_2.save(
+    os.path.join(SaveRoot, f"{Subject}_ICA2_after_interpolation-ica.fif"),
+    overwrite=True
+)
+# =============================================================================
+
+# =============================================================================
+# 10) SAVE INDIVIDUAL COMPONENT PROPERTIES FOR ICA #2
+# %%===========================================================================
+ICA2_Properties_Figure = ICA_2.plot_properties(
+    Epochs_Interp,
+    picks=list(range(0, ICA_N_COMPONENTS, 1)),
+    show=False
+)
+
+for Index, Fig in enumerate(ICA2_Properties_Figure):
+    Fig.savefig(
+        os.path.join(
+            SaveRoot,
+            f"{Subject}_ICA2_component_properties_{Index + 1}.pdf"
+        ),
+        dpi=300,
+        bbox_inches="tight"
+    )
+# =============================================================================
+
+# =============================================================================
+# 11) ICLABEL ON ICA #2
+# %%===========================================================================
+IcaLabels_2 = label_components(Epochs_Interp, ICA_2, method="iclabel")
+print(IcaLabels_2["labels"])
+
+ExcludedIndicesAuto_2 = []
+for i in range(0, len(IcaLabels_2["labels"])):
+    if IcaLabels_2["labels"][i] == "brain":
+        continue
+    elif IcaLabels_2["labels"][i] == "other":
+        continue
+    else:
+        ExcludedIndicesAuto_2.append(i)
+
+print("Auto-suggested bad ICA components at step 2:", ExcludedIndicesAuto_2)
+# =============================================================================
+
+# =============================================================================
+# 12) MANUAL EXCLUSION #1 AFTER ICA #2
+# %%===========================================================================
+MANUAL_EXCLUDE_STEP2 = [0, 1, 2, 3, 4, 5, 10, 14, 15, 17, 18, 19, 21, 22, 23, 25, 26, 27, 28, 29] # TO FILL
+
+InvalidManualExclude2 = [
+    idx for idx in MANUAL_EXCLUDE_STEP2
+    if idx < 0 or idx >= ICA_2.n_components_
+]
+if len(InvalidManualExclude2) > 0:
+    raise ValueError(
+        f"Invalid ICA indices in MANUAL_EXCLUDE_STEP2: {InvalidManualExclude2}"
+    )
+
+ICA_2.exclude = MANUAL_EXCLUDE_STEP2
+print("Manual exclusions at step 2:", ICA_2.exclude)
+
+if len(MANUAL_EXCLUDE_STEP2) > 0:
+    FigExcludedStep2 = ICA_2.plot_components(
+        picks=MANUAL_EXCLUDE_STEP2,
+        show=False
+    )
+    if isinstance(FigExcludedStep2, list):
+        for i, Fig in enumerate(FigExcludedStep2):
+            Fig.savefig(
+                os.path.join(SaveRoot, f"{Subject}_ICA2_manually_excluded_page_{i+1}.png"),
+                dpi=300,
+                bbox_inches="tight"
+            )
+    else:
+        FigExcludedStep2.savefig(
+            os.path.join(SaveRoot, f"{Subject}_ICA2_manually_excluded.png"),
+            dpi=300,
+            bbox_inches="tight"
+        )
+# =============================================================================
+
+# =============================================================================
+# 13) APPLY ICA #2
+# %%===========================================================================
+Epochs_After_ICA2 = Epochs_Interp.copy()
+ICA_2.apply(Epochs_After_ICA2)
+
+print("ICA #2 applied")
+# =============================================================================
+
+# =============================================================================
+# 14) ICA #3 : AFTER FIRST MANUAL CLEANING
+# %%===========================================================================
+ICA_3 = ICA(
+    n_components=ICA_N_COMPONENTS,
+    method=ICA_METHOD,
+    random_state=ICA_RANDOM_STATE,
+    max_iter=ICA_MAX_ITER,
+    fit_params=ICA_FIT_PARAMS
+)
+ICA_3.fit(Epochs_After_ICA2)
+
+FigICA3 = ICA_3.plot_components(
+    picks=range(30),
+    nrows=5,
+    ncols=6,
+    show=False
+    )
+
+if isinstance(FigICA3, list):
+    for i, Fig in enumerate(FigICA3):
+        Fig.savefig(
+            os.path.join(SaveRoot, f"{Subject}_ICA3_before_find_bads_eog_page_{i+1}.png"),
+            dpi=300,
+            bbox_inches="tight"
+        )
+else:
+    FigICA3.savefig(
+        os.path.join(SaveRoot, f"{Subject}_ICA3_before_find_bads_eog.png"),
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+ICA_3.save(
+    os.path.join(SaveRoot, f"{Subject}_ICA3_before_find_bads_eog-ica.fif"),
+    overwrite=True
+)
+# =============================================================================
+
+# =============================================================================
+# 15) FIND_BADS_EOG ON ICA #3
+# %%===========================================================================
+EOG_Components = []
+
+for EOGChannel in ["Fp1", "Fp2"]:
+    if EOGChannel in Epochs_After_ICA2.ch_names:
+        inds_eog, scores_eog = ICA_3.find_bads_eog(
+            Epochs_After_ICA2,
+            ch_name=EOGChannel
+        )
+        print(f"{EOGChannel} suspects:", inds_eog)
+        EOG_Components.extend(inds_eog)
+
+EOG_Components = sorted(list(set(EOG_Components)))
+print("Auto-detected EOG components:", EOG_Components)
+# =============================================================================
+
+# =============================================================================
+# 16) PLOT FOR SELECTING LAST BAD COMPONENTS
+# %%===========================================================================
+FigICA3 = ICA_3.plot_components(
+    picks=range(30),
+    nrows=5,
+    ncols=6,
+    show=False
+    )
+# =============================================================================
+
+# =============================================================================
+# 17) MANUAL COMPLEMENT AFTER FIND_BADS_EOG
+# %%===========================================================================
+EOG_Components = [] # TO FILL
+MANUAL_EXCLUDE_AFTER_EOG = [] # TO FILL
+
+InvalidManualExcludeAfterEOG = [
+    idx for idx in MANUAL_EXCLUDE_AFTER_EOG
+    if idx < 0 or idx >= ICA_3.n_components_
+]
+if len(InvalidManualExcludeAfterEOG) > 0:
+    raise ValueError(
+        f"Invalid ICA indices in MANUAL_EXCLUDE_AFTER_EOG: {InvalidManualExcludeAfterEOG}"
+    )
+
+FinalExcludeICA3 = sorted(list(set(EOG_Components + MANUAL_EXCLUDE_AFTER_EOG)))
+ICA_3.exclude = FinalExcludeICA3
+
+print("Final exclusions on ICA #3:", ICA_3.exclude)
+
+if len(FinalExcludeICA3) > 0:
+    FigExcludedStep3 = ICA_3.plot_components(
+        picks=FinalExcludeICA3,
+        show=False
+    )
+    if isinstance(FigExcludedStep3, list):
+        for i, Fig in enumerate(FigExcludedStep3):
+            Fig.savefig(
+                os.path.join(SaveRoot, f"{Subject}_ICA3_excluded_after_eog_page_{i+1}.png"),
+                dpi=300,
+                bbox_inches="tight"
+            )
+    else:
+        FigExcludedStep3.savefig(
+            os.path.join(SaveRoot, f"{Subject}_ICA3_excluded_after_eog.png"),
+            dpi=300,
+            bbox_inches="tight"
+        )
+# =============================================================================
+
+# =============================================================================
+# 18) APPLY ICA #3
+# %%===========================================================================
+Epochs_FinalClean = Epochs_After_ICA2.copy()
+ICA_3.apply(Epochs_FinalClean)
+
+print("ICA #3 applied")
+# =============================================================================
+
+# =============================================================================
+# 19) ICA #4 FINAL DOCUMENTATION
+# %%===========================================================================
+ICA_4 = ICA(
+    n_components=ICA_N_COMPONENTS,
+    method=ICA_METHOD,
+    random_state=ICA_RANDOM_STATE,
+    max_iter=ICA_MAX_ITER,
+    fit_params=ICA_FIT_PARAMS
+)
+ICA_4.fit(Epochs_FinalClean)
+
+FigICA4 = ICA_4.plot_components(
+    picks=range(30),
+    nrows=5,
+    ncols=6,
+    show=False
+    )
+
+if isinstance(FigICA4, list):
+    for i, Fig in enumerate(FigICA4):
+        Fig.savefig(
+            os.path.join(SaveRoot, f"{Subject}_ICA4_final_page_{i+1}.png"),
+            dpi=300,
+            bbox_inches="tight"
+        )
+else:
+    FigICA4.savefig(
+        os.path.join(SaveRoot, f"{Subject}_ICA4_final.png"),
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+ICA_4.save(
+    os.path.join(SaveRoot, f"{Subject}_ICA4_final_documentation-ica.fif"),
+    overwrite=True
+)
+# =============================================================================
+
+# =============================================================================
+# 20) FINAL SAVE OF EPOCHS
+# %%===========================================================================
+FinalEpochsFile = os.path.join(
+    SaveRoot,
+    f"{Subject}_PreBaseline_MW_final_cleaned-epo.fif"
+)
+Epochs_FinalClean.save(FinalEpochsFile, overwrite=True)
+
+print("Final cleaned epochs saved")
+# =============================================================================
+
+# =============================================================================
+# 21) FINAL SAVE OF EVOKEDS
+# %%===========================================================================
+EvokedFinal = Epochs_FinalClean.average()
+EvokedFinalFile = os.path.join(
+    SaveRoot,
+    f"{Subject}_PreBaseline_MW_final_cleaned-ave.fif"
+)
+EvokedFinal.save(EvokedFinalFile, overwrite=True)
+
+print("Final evoked saved")
+# =============================================================================
+
+# =============================================================================
+# 22) SAVE LOG
+# %%===========================================================================
+ProcessingLog = {
+    "Subject": Subject,
+    "FilePath": FilePath,
+    "LFreq": LFreq,
+    "HFreq": HFreq,
+    "Tmin": Tmin,
+    "Tmax": Tmax,
+    "NumberEpochsBeforeRejection": NumberEpochsBeforeRejection,
+    "RejectedEpochIndices_AutoReject": RejectedEpochIndices_AutoReject,
+    "NumberEpochsAfterAutoReject": NumberEpochsBeforeManualRejection,
+    "RejectedEpochIndices_Manual": RejectedEpochIndices_Manual,
+    "NumberEpochsAfterManualRejection": len(Epochs),
+    "ICA_N_COMPONENTS": ICA_N_COMPONENTS,
+    "ICA_METHOD": ICA_METHOD,
+    "ICA_RANDOM_STATE": ICA_RANDOM_STATE,
+    "ICA_MAX_ITER": str(ICA_MAX_ITER),
+    "ICA_FIT_PARAMS": ICA_FIT_PARAMS,
+    "CHANNELS_TO_INTERPOLATE": CHANNELS_TO_INTERPOLATE,
+    "ExistingChannelsToInterpolate": ExistingChannelsToInterpolate,
+    "ICLABEL_step2_labels": IcaLabels_2["labels"],
+    "ICLABEL_step2_auto_suggested_bad_components": ExcludedIndicesAuto_2,
+    "MANUAL_EXCLUDE_STEP2": MANUAL_EXCLUDE_STEP2,
+    "EOG_Components_step3": EOG_Components,
+    "MANUAL_EXCLUDE_AFTER_EOG": MANUAL_EXCLUDE_AFTER_EOG,
+    "FinalExcludeICA3": FinalExcludeICA3
+}
+
+with open(
+    os.path.join(SaveRoot, f"{Subject}_processing_log.txt"),
+    "w",
+    encoding="utf-8"
+) as f:
+    
+    for key, value in ProcessingLog.items():
+        f.write(f"{key} : {value}\n")
+
+print("Processing log saved")
+print("Done.")
+# =============================================================================
