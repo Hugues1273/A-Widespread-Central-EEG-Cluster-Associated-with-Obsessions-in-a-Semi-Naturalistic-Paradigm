@@ -1,0 +1,930 @@
+# -*- coding: utf-8 -*-
+"""
+Written by Hugues Lamothe
+Article: A Widespread Central EEG Cluster Associated with Obsessions Revealed 
+By A Semi-Naturalistic Symptom Provocation Paradigm
+"""
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+import pygame as pg
+import pandas as pd
+import time
+import random
+import os
+from psychopy import parallel ## pip install pyparallel
+
+os.environ['SDL_VIDEO_CENTERED'] = '1'
+# =============================================================================
+
+# =============================================================================
+# PATH OF THE CREATED FUNCTION
+# =============================================================================
+os.chdir("Path")
+from OCDEvaluation import OCDEvaluation
+# =============================================================================
+
+# =============================================================================
+# CHOSING THE PARALLEL PORT
+# =============================================================================
+port = parallel.ParallelPort(0xdff8)
+# =============================================================================
+
+# =============================================================================
+# DICTIONARY TO SAVE THE SCORES
+# =============================================================================
+ScoreDictionnary = {}
+# =============================================================================
+
+# =============================================================================
+# FONTS AND COLORS
+# =============================================================================
+pg.init()
+
+Font1 = pg.font.SysFont("Courier New", 60)
+
+Grey1 = [192, 192, 192]
+Grey2 = [96, 96, 96]
+Black1 = [0, 0, 0]
+White1 = [255, 255, 255]
+# =============================================================================
+
+# =============================================================================
+# LOADING PICTURES
+# =============================================================================
+path1 = "Path"
+PatientPictureListWithoutPath = os.listdir(path1)
+PatientPictureList = []
+for Elt in PatientPictureListWithoutPath:
+    PatientPictureList.append(path1 + "//" + Elt)
+ShuffledPatientPictureList = random.sample(PatientPictureList, len(PatientPictureList))
+PatientBlock1 = ShuffledPatientPictureList[0:5]
+PatientBlock2 = ShuffledPatientPictureList[5:10]
+PatientBlock3 = ShuffledPatientPictureList[10:len(ShuffledPatientPictureList)]
+ShuffledPatientPictureList = random.sample(PatientPictureList, len(PatientPictureList))
+PatientBlock4 = ShuffledPatientPictureList[0:5]
+PatientBlock5 = ShuffledPatientPictureList[5:10]
+PatientBlock6 = ShuffledPatientPictureList[10:len(ShuffledPatientPictureList)]
+ShuffledPatientPictureList = random.sample(PatientPictureList, len(PatientPictureList))
+PatientBlock7 = ShuffledPatientPictureList[0:5]
+PatientBlock8 = ShuffledPatientPictureList[5:10]
+PatientBlock9 = ShuffledPatientPictureList[10:len(ShuffledPatientPictureList)]
+ShuffledPatientPictureList = random.sample(PatientPictureList, len(PatientPictureList))
+PatientBlock10 = ShuffledPatientPictureList[0:5]
+PatientBlock11 = ShuffledPatientPictureList[5:10]
+PatientBlock12 = ShuffledPatientPictureList[10:len(ShuffledPatientPictureList)]
+
+path2 = "Path"
+NeutralPictureListWithoutPath = os.listdir(path2)
+NeutralPictureList = []
+for Elt in NeutralPictureListWithoutPath:
+    NeutralPictureList.append(path2 + "//" + Elt)
+ShuffledNeutralPictureList = random.sample(NeutralPictureList, len(NeutralPictureList))
+NeutralBlock1 = ShuffledNeutralPictureList[0:5]
+NeutralBlock2 = ShuffledNeutralPictureList[5:10]
+NeutralBlock3 = ShuffledNeutralPictureList[10:len(ShuffledNeutralPictureList)]
+ShuffledNeutralPictureList = random.sample(NeutralPictureList, len(NeutralPictureList))
+NeutralBlock4 = ShuffledNeutralPictureList[0:5]
+NeutralBlock5 = ShuffledNeutralPictureList[5:10]
+NeutralBlock6 = ShuffledNeutralPictureList[10:len(ShuffledPatientPictureList)]
+huffledNeutralPictureList = random.sample(NeutralPictureList, len(NeutralPictureList))
+NeutralBlock7 = ShuffledNeutralPictureList[0:5]
+NeutralBlock8 = ShuffledNeutralPictureList[5:10]
+NeutralBlock9 = ShuffledNeutralPictureList[10:len(ShuffledNeutralPictureList)]
+ShuffledNeutralPictureList = random.sample(NeutralPictureList, len(NeutralPictureList))
+NeutralBlock10 = ShuffledNeutralPictureList[0:5]
+NeutralBlock11 = ShuffledNeutralPictureList[5:10]
+NeutralBlock12 = ShuffledNeutralPictureList[10:len(ShuffledPatientPictureList)]
+
+path3 = "Path"
+ExemplePictureList = os.listdir(path3)
+
+path4 = "Path"
+GenericPictureListWithoutPath = os.listdir(path4)
+GenericPictureList = []
+for Elt in GenericPictureListWithoutPath:
+    GenericPictureList.append(path4 + "//" + Elt)
+ShuffledGenericPictureList = random.sample(GenericPictureList, len(GenericPictureList))
+GenericBlock1 = ShuffledGenericPictureList[0:5]
+GenericBlock2 = ShuffledGenericPictureList[5:10]
+GenericBlock3 = ShuffledGenericPictureList[10:len(ShuffledPatientPictureList)]
+ShuffledPatientPictureList = random.sample(GenericPictureList, len(GenericPictureList))
+GenericBlock4 = ShuffledGenericPictureList[0:5]
+GenericBlock5 = ShuffledGenericPictureList[5:10]
+GenericBlock6 = ShuffledGenericPictureList[10:len(ShuffledGenericPictureList)]
+ShuffledGenericPictureList = random.sample(GenericPictureList, len(GenericPictureList))
+GenericBlock7 = ShuffledGenericPictureList[0:5]
+GenericBlock8 = ShuffledGenericPictureList[5:10]
+GenericBlock9 = ShuffledGenericPictureList[10:len(ShuffledPatientPictureList)]
+ShuffledPatientPictureList = random.sample(GenericPictureList, len(GenericPictureList))
+GenericBlock10 = ShuffledGenericPictureList[0:5]
+GenericBlock11 = ShuffledGenericPictureList[5:10]
+GenericBlock12 = ShuffledGenericPictureList[10:len(ShuffledGenericPictureList)]
+# =============================================================================
+
+# =============================================================================
+# SCORE LISTS
+# =============================================================================
+PictureScore = []
+PictureIDList = []
+PortValueList = []
+# =============================================================================
+
+# =============================================================================
+# TASK EXPLANATIONS FOR THE PATIENTS
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+pg.mouse.set_visible(True)
+
+Text1 = "Nous allons vous demander"
+Text2 = "de regarder la croix centrale"
+Text3 = "sans rien faire"
+Text4 = "pendant 3 minutes"
+Text5 = "C'est parti!"
+
+x1 =  775
+y1 = 895
+
+Click = 0
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (525, 300))
+Window1.blit(Font1.render(Text2, False, White1), (450, 400))
+Window1.blit(Font1.render(Text3, False, White1), (700, 500))
+Window1.blit(Font1.render(Text4, False, White1), (675, 600))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text5, False, White1), (775, 900))
+pg.display.update()
+
+while Click == 0:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (525, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (450, 400))
+    Window1.blit(Font1.render(Text3, False, White1), (700, 500))
+    Window1.blit(Font1.render(Text4, False, White1), (675, 600))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+    Window1.blit(Font1.render(Text5, False, White1), (775, 900))
+    for event in pg.event.get():
+        if 775 + 400 >= pg.mouse.get_pos()[0] >= 775 and 895 + 75 >= pg.mouse.get_pos()[1] >= 895:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text5, False, White1), (775, 900))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text5, False, White1), (775, 900))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+            Window1.blit(Font1.render(Text5, False, White1), (775, 900))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# FIXATION CROSS
+# =============================================================================
+TimerStart = time.time()
+
+port.setData(100) #c'est cette commande qui envoit le signal!!
+PortValue = 100
+PortValueList.append(PortValue)
+PictureIDList.append("Mind Wandering Yeux Ouverts")
+PictureScore.append(0)
+
+while time.time() < TimerStart + 180: #+180
+    Window1.fill(Black1)
+    pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+    pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL FOR RESTING STATE
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+pg.mouse.set_visible(True)
+
+Text1 = "Parfait!"
+Text2 = "Et maintenant la même chose"
+Text3 = "Mais les yeux fermés"
+Text4 = "Nous vous dirons quand ce sera terminé"
+Text5 = "cela dure 3 minutes"
+Text6 = "C'est parti!"
+
+x1 =  775
+y1 = 895
+
+Click = 0
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (825, 300))
+Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+Window1.blit(Font1.render(Text3, False, White1), (625, 500))
+Window1.blit(Font1.render(Text4, False, White1), (300, 600))
+Window1.blit(Font1.render(Text5, False, White1), (650, 700))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+pg.display.update()
+
+while Click == 0:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (825, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+    Window1.blit(Font1.render(Text3, False, White1), (625, 500))
+    Window1.blit(Font1.render(Text4, False, White1), (300, 600))
+    Window1.blit(Font1.render(Text5, False, White1), (650, 700))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+    Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+    for event in pg.event.get():
+        if 775 + 400 >= pg.mouse.get_pos()[0] >= 775 and 895 + 75 >= pg.mouse.get_pos()[1] >= 895:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+            Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# FIXATION CROSS
+# =============================================================================
+TimerStart = time.time()
+
+port.setData(125)
+PortValue = 125
+PortValueList.append(PortValue)
+PictureIDList.append("Mind Wandering Yeux Fermés")
+PictureScore.append(0)
+
+while time.time() < TimerStart + 180: # + 180
+    Window1.fill(Black1)
+    pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+    pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+TimerStart = time.time()
+
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Bienvenue"
+Text2 = "Merci pour votre participation"
+Text3 = "à ce protocole de recherche"
+
+while time.time() <= TimerStart + 5:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (775, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (425, 500))
+    Window1.blit(Font1.render(Text3, False, White1), (475, 600))
+    pg.display.update()
+# =============================================================================    
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Dans ce protocole de recherche"
+Text2 = "nous allons vous présenter"
+Text3 = "les photos que vous nous avez fournies"
+Text4 = "ainsi que d'autres photos"
+
+
+while TimerStart + 5 < time.time() <= TimerStart + 15: #+5 et +15
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (425, 400))
+    Window1.blit(Font1.render(Text2, False, White1), (500, 500))
+    Window1.blit(Font1.render(Text3, False, White1), (300, 600))
+    Window1.blit(Font1.render(Text4, False, White1), (515, 700))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Chacune de ces photos"
+Text2 = "vous sera présentée cinq secondes"
+
+while TimerStart + 15 < time.time() <= TimerStart + 20: #+15 et +20
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (575, 400))
+    Window1.blit(Font1.render(Text2, False, White1), (300, 500))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Entre chaque photo"
+Text2 = "une croix sera présentée au centre de l'écran"
+Text3 = "Vous devrez fixer cette croix"
+
+while TimerStart + 20 < time.time() <= TimerStart + 30: #+20 et +30
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (600, 400))
+    Window1.blit(Font1.render(Text2, False, White1), (150, 500))
+    Window1.blit(Font1.render(Text3, False, White1), (400, 600))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Losqu'une photo vous sera présentée"
+Text2 = "vous devrez fixer la photo"
+
+while TimerStart + 20 < time.time() <= TimerStart + 35: #+20 et +35
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (350, 400))
+    Window1.blit(Font1.render(Text2, False, White1), (500, 500))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Après chaque photo présentée,"
+Text2 = "vous devrez mesurer l'intensité du TOC"
+Text3 = "déclenché par la photo"
+Text4 = "que ce soit en termes d'obsessions induites"
+Text5 = "ou d'envie de réaliser des compulsions."
+Text6 = "vous mesurerez l'intensité du TOC"
+Text7 = "gràce à une échelle"
+Text8 = "allant de 0 pour 'aucun TOC'"
+Text9 = "à 10 pour 'maximum de TOC imaginable'."
+Text10 = "Pour choisir,"
+Text11 = "vous devrez cliquer sur le chiffre correspondant"
+Text12 = "à l'intensité du TOC"
+
+while TimerStart + 35 < time.time() <= TimerStart + 65: #+35 et +65
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (475, 200))
+    Window1.blit(Font1.render(Text2, False, White1), (275, 250))
+    Window1.blit(Font1.render(Text3, False, White1), (550, 300))
+    Window1.blit(Font1.render(Text4, False, White1), (150, 350))
+    Window1.blit(Font1.render(Text5, False, White1), (200, 400))
+    Window1.blit(Font1.render(Text6, False, White1), (350, 500))
+    Window1.blit(Font1.render(Text7, False, White1), (600, 550))
+    Window1.blit(Font1.render(Text8, False, White1), (450, 600))
+    Window1.blit(Font1.render(Text9, False, White1), (275, 650))
+    Window1.blit(Font1.render(Text10, False, White1), (700, 750))
+    Window1.blit(Font1.render(Text11, False, White1), (75, 800))
+    Window1.blit(Font1.render(Text12, False, White1), (575, 850))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+Text1 = "Allons y pour un exemple"
+Text2 = "Si vous êtes prêt cliquez sur 'Exemple !'"
+Text3 = "Exemple!"
+x1 =  775
+y1 = 700
+
+Click = 0
+
+while Click == 0:
+    pg.mouse.set_visible(True)
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (500, 400))
+    Window1.blit(Font1.render(Text2, False, White1), (200, 500))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 350, 75))
+    Window1.blit(Font1.render(Text3, False, White1), (815, 700))
+    for event in pg.event.get():
+        if 775 + 350 >= pg.mouse.get_pos()[0] >= 775 and 700 + 75 >= pg.mouse.get_pos()[1] >= 700:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 350, 75))
+                Window1.blit(Font1.render(Text3, False, White1), (815, 700))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 350, 75))
+                Window1.blit(Font1.render(Text3, False, White1), (815, 700))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 350, 75))
+            Window1.blit(Font1.render(Text3, False, White1), (815, 700))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXEMPLE BLOC
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+for k in range(len(ExemplePictureList)):
+    pg.mouse.set_visible(False)
+    TimerStart = time.time()
+    while time.time() < TimerStart + 5:
+        Window1.fill(Black1)
+        pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+        pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+        pg.display.update()
+    ExemplePicture1 = pg.image.load(os.path.join(path3, ExemplePictureList[k]))
+    ExemplePicture2 = pg.transform.scale(ExemplePicture1, (910, 500))
+    ExemplePicture3 = ExemplePicture2.get_rect(center = (1920/2, 1080/2))
+    while TimerStart + 5 <= time.time() < TimerStart + 10: #+10
+        port.setData(255)
+        Window1.fill(Black1)
+        Window1.blit(ExemplePicture2, ExemplePicture3)
+        pg.display.update()
+    port.setData(0)
+    Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+    Window1.fill(Black1)
+    OCDEvaluation()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+pg.mouse.set_visible(True)
+
+Text1 = "Maintenant que vous avez compris"
+Text2 = "le principe de la tâche"
+Text3 = "Cliquez sur 'c'est parti!'"
+Text4 = "C'est parti!"
+
+x1 =  700
+y1 = 695
+
+Click = 0
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (350, 300))
+Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+Window1.blit(Font1.render(Text3, False, White1), (465, 500))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+pg.display.update()
+
+while Click == 0:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (350, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+    Window1.blit(Font1.render(Text3, False, White1), (465, 500))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+    Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+    for event in pg.event.get():
+        if 700 + 400 >= pg.mouse.get_pos()[0] >= 700 and 695 + 75 >= pg.mouse.get_pos()[1] >= 695:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+            Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# CORE TASK
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+
+BlockNumber = list(range(1, 7)) #list(range(1, 7))
+BlockLen = list(range(15))
+BlockDict = {}
+BlockList1 = PatientBlock1 + NeutralBlock1 + GenericBlock1
+BlockList1 = [BlockList1[0], BlockList1[5], BlockList1[10], BlockList1[1], 
+              BlockList1[11], BlockList1[6], BlockList1[12], BlockList1[2], 
+              BlockList1[7], BlockList1[13], BlockList1[8], BlockList1[3], 
+              BlockList1[9], BlockList1[14], BlockList1[4]]
+BlockList2 = PatientBlock2 + NeutralBlock2 + GenericBlock2
+BlockList2 = [BlockList2[0], BlockList2[5], BlockList2[10], BlockList2[1], 
+              BlockList2[11], BlockList2[6], BlockList2[12], BlockList2[2], 
+              BlockList2[7], BlockList2[13], BlockList2[8], BlockList2[3], 
+              BlockList2[9], BlockList2[14], BlockList2[4]]
+BlockList3 = PatientBlock3 + NeutralBlock3 + GenericBlock3
+BlockList3 = [BlockList3[0], BlockList3[5], BlockList3[10], BlockList3[1], 
+              BlockList3[11], BlockList3[6], BlockList3[12], BlockList3[2], 
+              BlockList3[7], BlockList3[13], BlockList3[8], BlockList3[3], 
+              BlockList3[9], BlockList3[14], BlockList3[4]]
+BlockList4 = PatientBlock4 + NeutralBlock4 + GenericBlock4
+BlockList4 = [BlockList4[0], BlockList4[5], BlockList4[10], BlockList4[1], 
+              BlockList4[11], BlockList4[6], BlockList4[12], BlockList4[2], 
+              BlockList4[7], BlockList4[13], BlockList4[8], BlockList4[3], 
+              BlockList4[9], BlockList4[14], BlockList4[4]]
+BlockList5 = PatientBlock5 + NeutralBlock5 + GenericBlock5
+BlockList5 = [BlockList5[0], BlockList5[5], BlockList5[10], BlockList5[1], 
+              BlockList5[11], BlockList5[6], BlockList5[12], BlockList5[2], 
+              BlockList5[7], BlockList5[13], BlockList5[8], BlockList5[3], 
+              BlockList5[9], BlockList5[14], BlockList5[4]]
+BlockList6 = PatientBlock6 + NeutralBlock6 + GenericBlock6
+BlockList6 = [BlockList6[0], BlockList6[5], BlockList6[10], BlockList6[1], 
+              BlockList6[11], BlockList6[6], BlockList6[12], BlockList6[2], 
+              BlockList6[7], BlockList6[13], BlockList6[8], BlockList6[3], 
+              BlockList6[9], BlockList6[14], BlockList6[4]]
+
+BlockDict["Block1"] = BlockList1
+BlockDict["Block2"] = BlockList2
+BlockDict["Block3"] = BlockList3
+BlockDict["Block4"] = BlockList4
+BlockDict["Block5"] = BlockList5
+BlockDict["Block6"] = BlockList6
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (350, 300))
+Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+Window1.blit(Font1.render(Text3, False, White1), (465, 500))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+pg.display.update()
+
+for i in BlockNumber:
+    for k in range(0, len(BlockLen)):
+        pg.mouse.set_visible(False)
+        TimerStart = time.time()
+        Random = random.uniform(2, 4) #2,4
+        while time.time() < TimerStart + Random:
+            Window1.fill(Black1)
+            pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+            pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+            pg.display.update()
+        if "Patient" in BlockDict["Block{0}".format(i)][k]:
+            port.setData(254)
+            PortValue = 254
+            PortValueList.append(PortValue)
+            PictureIDList.append(BlockDict["Block{0}".format(i)][k])
+        elif "Neutres" in BlockDict["Block{0}".format(i)][k]:
+            port.setData(170)
+            PortValue = 170
+            PortValueList.append(PortValue)
+            PictureIDList.append(BlockDict["Block{0}".format(i)][k])
+        else:
+            port.setData(85)
+            PortValue = 85
+            PortValueList.append(PortValue)
+            PictureIDList.append(BlockDict["Block{0}".format(i)][k])            
+        if "Patient" in BlockDict["Block{0}".format(i)][k]:
+             Picture1 = pg.image.load(BlockDict["Block{0}".format(i)][k])
+        else: 
+            Picture1 = pg.image.load(BlockDict["Block{0}".format(i)][k])
+        while TimerStart + Random  <= time.time() < TimerStart + (Random + 5): #(random +5)
+            port.setData(PortValue)
+            Window1.fill(Black1)
+            Window1.blit(Picture1, Picture1.get_rect(center = Window1.get_rect().center))
+            pg.display.update()
+        PictureScore.append(OCDEvaluation())
+# =============================================================================
+
+# =============================================================================
+# PAUSE PANEL
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+pg.mouse.set_visible(True)
+
+Text1 = "Vous êtes à la moitié de l'expérience"
+Text2 = "Nous vous proposons une pause"
+Text3 = "Quand vous serez prêt à reprendre"
+Text4 = "Cliquez sur 'c'est parti!'"
+Text5 = "C'est parti!"
+
+x1 =  700
+y1 = 795
+
+Click = 0
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (225, 300))
+Window1.blit(Font1.render(Text2, False, White1), (450, 400))
+Window1.blit(Font1.render(Text3, False, White1), (350, 500))
+Window1.blit(Font1.render(Text4, False, White1), (500, 600))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text5, False, White1), (700, 800))
+pg.display.update()
+
+while Click == 0:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (225, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (450, 400))
+    Window1.blit(Font1.render(Text3, False, White1), (350, 500))
+    Window1.blit(Font1.render(Text4, False, White1), (500, 600))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+    Window1.blit(Font1.render(Text5, False, White1), (700, 800))
+    for event in pg.event.get():
+        if 700 + 400 >= pg.mouse.get_pos()[0] >= 700 and 795 + 75 >= pg.mouse.get_pos()[1] >= 795:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text5, False, White1), (700, 800))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text5, False, White1), (700, 800))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+            Window1.blit(Font1.render(Text5, False, White1), (700, 800))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# CORE TASK
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+BlockNumber = list(range(7, 13))
+BlockLen = list(range(15))
+BlockDict = {}
+BlockList7 = PatientBlock7 + NeutralBlock7 + GenericBlock7
+BlockList7 = [BlockList7[0], BlockList7[5], BlockList7[10], BlockList7[1], 
+              BlockList7[11], BlockList7[6], BlockList7[12], BlockList7[2], 
+              BlockList7[7], BlockList7[13], BlockList7[8], BlockList7[3], 
+              BlockList7[9], BlockList7[14], BlockList7[4]]
+BlockList8 = PatientBlock8 + NeutralBlock8 + GenericBlock8
+BlockList8 = [BlockList8[0], BlockList8[5], BlockList8[10], BlockList8[1], 
+              BlockList8[11], BlockList8[6], BlockList8[12], BlockList8[2], 
+              BlockList8[7], BlockList8[13], BlockList8[8], BlockList8[3], 
+              BlockList8[9], BlockList8[14], BlockList8[4]]
+BlockList9 = PatientBlock9 + NeutralBlock9 + GenericBlock9
+BlockList9 = [BlockList9[0], BlockList9[5], BlockList9[10], BlockList9[1], 
+              BlockList9[11], BlockList9[6], BlockList9[12], BlockList9[2], 
+              BlockList9[7], BlockList9[13], BlockList9[8], BlockList9[3], 
+              BlockList9[9], BlockList9[14], BlockList9[4]]
+BlockList10 = PatientBlock10 + NeutralBlock10 + GenericBlock10
+BlockList10 = [BlockList10[0], BlockList10[5], BlockList10[10], BlockList10[1], 
+              BlockList10[11], BlockList10[6], BlockList10[12], BlockList10[2], 
+              BlockList10[7], BlockList10[13], BlockList10[8], BlockList10[3], 
+              BlockList10[9], BlockList10[14], BlockList10[4]]
+BlockList11 = PatientBlock11 + NeutralBlock11 + GenericBlock11
+BlockList11 = [BlockList11[0], BlockList11[5], BlockList11[10], BlockList11[1], 
+              BlockList11[11], BlockList11[6], BlockList11[12], BlockList11[2], 
+              BlockList11[7], BlockList11[13], BlockList11[8], BlockList11[3], 
+              BlockList11[9], BlockList11[14], BlockList11[4]]
+BlockList12 = PatientBlock12 + NeutralBlock12 + GenericBlock12
+BlockList12 = [BlockList12[0], BlockList12[5], BlockList12[10], BlockList12[1], 
+              BlockList12[11], BlockList12[6], BlockList12[12], BlockList12[2], 
+              BlockList12[7], BlockList12[13], BlockList12[8], BlockList12[3], 
+              BlockList12[9], BlockList12[14], BlockList12[4]]
+
+BlockDict["Block7"] = BlockList7
+BlockDict["Block8"] = BlockList8
+BlockDict["Block9"] = BlockList9
+BlockDict["Block10"] = BlockList10
+BlockDict["Block11"] = BlockList11
+BlockDict["Block12"] = BlockList12
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (350, 300))
+Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+Window1.blit(Font1.render(Text3, False, White1), (465, 500))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text4, False, White1), (700, 700))
+pg.display.update()
+
+for i in BlockNumber:
+    for k in range(0, len(BlockLen)):
+        pg.mouse.set_visible(False)
+        TimerStart = time.time()
+        Random = random.uniform(2, 4) #2,4
+        while time.time() < TimerStart + Random:
+            Window1.fill(Black1)
+            pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+            pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+            pg.display.update()
+        if "Patient" in BlockDict["Block{0}".format(i)][k]:
+            port.setData(254)
+            PortValue = 254
+            PortValueList.append(PortValue)
+            PictureIDList.append(BlockDict["Block{0}".format(i)][k])
+        elif "Neutres" in BlockDict["Block{0}".format(i)][k]:
+            port.setData(170)
+            PortValue = 170
+            PortValueList.append(PortValue)
+            PictureIDList.append(BlockDict["Block{0}".format(i)][k])
+        else:
+            port.setData(85)
+            PortValue = 85
+            PortValueList.append(PortValue)
+            PictureIDList.append(BlockDict["Block{0}".format(i)][k])            
+        if "Patient" in BlockDict["Block{0}".format(i)][k]: 
+             Picture1 = pg.image.load(BlockDict["Block{0}".format(i)][k])
+            
+        else: 
+            Picture1 = pg.image.load(BlockDict["Block{0}".format(i)][k])
+        while TimerStart + Random  <= time.time() < TimerStart + (Random + 5): #(random + 5)
+             port.setData(PortValue)
+             Window1.fill(Black1)
+             Window1.blit(Picture1, Picture1.get_rect(center = Window1.get_rect().center))
+             pg.display.update()
+        PictureScore.append(OCDEvaluation())
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL FOR RESTING STATE
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+pg.mouse.set_visible(True)
+
+Text1 = "Nous vous remercions d'avoir accompli la tâche"
+Text2 = "Nous allons maintenant vous demander"
+Text3 = "de regarder la croix centrale"
+Text4 = "sans rien faire"
+Text5 = "pendant 3 minutes"
+Text6 = "C'est parti!"
+
+x1 =  775
+y1 = 895
+
+Click = 0
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (125, 300))
+Window1.blit(Font1.render(Text2, False, White1), (300, 400))
+Window1.blit(Font1.render(Text3, False, White1), (425, 500))
+Window1.blit(Font1.render(Text4, False, White1), (700, 600))
+Window1.blit(Font1.render(Text5, False, White1), (675, 700))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+pg.display.update()
+
+while Click == 0:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (125, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (300, 400))
+    Window1.blit(Font1.render(Text3, False, White1), (425, 500))
+    Window1.blit(Font1.render(Text4, False, White1), (700, 600))
+    Window1.blit(Font1.render(Text5, False, White1), (675, 700))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+    Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+    for event in pg.event.get():
+        if 775 + 400 >= pg.mouse.get_pos()[0] >= 775 and 895 + 75 >= pg.mouse.get_pos()[1] >= 895:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+            Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# FIXATION CROSS
+# =============================================================================
+TimerStart = time.time()
+
+port.setData(100)
+PortValue = 100
+PortValueList.append(PortValue)
+PictureIDList.append("Mind Wandering Yeux Ouverts")
+PictureScore.append(0)
+
+while time.time() < TimerStart + 180:
+    Window1.fill(Black1)
+    pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+    pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+    pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# EXPLANATION PANEL FOR RESTING STATE
+# =============================================================================
+Window1 = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+
+pg.mouse.set_visible(True)
+
+Text1 = "Parfait!"
+Text2 = "Et maintenant la même chose"
+Text3 = "Mais les yeux fermés"
+Text4 = "Nous vous dirons quand ce sera terminé"
+Text5 = "cela dure 3 minutes"
+Text6 = "C'est parti!"
+
+x1 =  775
+y1 = 895
+
+Click = 0
+
+Window1.fill(Black1)
+Window1.blit(Font1.render(Text1, False, White1), (825, 300))
+Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+Window1.blit(Font1.render(Text3, False, White1), (625, 500))
+Window1.blit(Font1.render(Text4, False, White1), (300, 600))
+Window1.blit(Font1.render(Text5, False, White1), (650, 700))
+pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+pg.display.update()
+
+while Click == 0:
+    Window1.fill(Black1)
+    Window1.blit(Font1.render(Text1, False, White1), (825, 300))
+    Window1.blit(Font1.render(Text2, False, White1), (500, 400))
+    Window1.blit(Font1.render(Text3, False, White1), (625, 500))
+    Window1.blit(Font1.render(Text4, False, White1), (300, 600))
+    Window1.blit(Font1.render(Text5, False, White1), (650, 700))
+    pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+    Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+    for event in pg.event.get():
+        if 775 + 400 >= pg.mouse.get_pos()[0] >= 775 and 895 + 75 >= pg.mouse.get_pos()[1] >= 895:
+            if event.type == pg.MOUSEBUTTONUP:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+                pg.display.update()
+                Click += 1
+            else:
+                pg.draw.rect(Window1, Grey1, (x1, y1, 425, 75))
+                Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+                pg.display.update()
+                continue
+        else:
+            pg.draw.rect(Window1, Grey2, (x1, y1, 425, 75))
+            Window1.blit(Font1.render(Text6, False, White1), (775, 900))
+            pg.display.update()
+# =============================================================================
+
+# =============================================================================
+# FIXATION CROSS
+# =============================================================================
+TimerStart = time.time()
+
+port.setData(125)
+PortValue = 125
+PortValueList.append(PortValue)
+PictureIDList.append("Mind Wandering Yeux Fermés")
+PictureScore.append(0)
+
+while time.time() < TimerStart + 180:
+    Window1.fill(Black1)
+    pg.draw.line(Window1, White1, (1920/2, 500), (1920/2, 580))
+    pg.draw.line(Window1, White1, (920, 1080/2), (1000, 1080/2))
+    pg.display.update()
+port.setData(0)
+# =============================================================================
+        
+# =============================================================================
+# CLOSING PYGAME  
+# =============================================================================
+pg.quit()
+# =============================================================================
+
+# =============================================================================
+# FILLING DICTIONARY
+# =============================================================================
+ScoreDictionnary["PictureScore"] = PictureScore
+ScoreDictionnary["PictureIDList"] = PictureIDList
+ScoreDictionnary["PortValueList"] = PortValueList
+print(ScoreDictionnary)
+# =============================================================================
+
+# =============================================================================
+# TEXT FILE CREATION
+# =============================================================================
+SubjectID = input("Entrez l'identifiant du sujet: ")
+EEGType = input("Entrez le type d'EEG utilisé: ")
+df = pd.DataFrame(ScoreDictionnary)
+df.to_string("Path/{}{}.txt".format(SubjectID, EEGType))
+# =============================================================================
+
+
+
+
+
+
+
