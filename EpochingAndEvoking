@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+"""
+Written by Hugues Lamothe
+Article: A Widespread Central EEG Cluster Associated with Obsessions Revealed 
+By A Semi-Naturalistic Symptom Provocation Paradigm
+"""
+
+# =============================================================================
+# FIRST OF ALL, USE THE FILE MODIFYINGVMRKFILE.PY ++++++++
+# =============================================================================
+
+# =============================================================================
+# IMPORTS
+# %%===========================================================================
+import mne
+# =============================================================================
+
+# =============================================================================
+# PATH DEFINING
+# %%===========================================================================
+# Then, I load the data
+print("I define the path")
+Subject = "PatientID"
+FolderPath = f"Path/{Subject}"
+# =============================================================================
+
+# =============================================================================
+# RAW DATA LOADING
+# %%===========================================================================
+print("I load the data")
+Epochs = mne.read_epochs(FolderPath + f"/{Subject}_PreBaseline_final_cleaned-epo.fif".format(Subject), preload=True)
+Epochs.info
+print(Epochs.event_id)
+# =============================================================================
+
+# =============================================================================
+# PATHS TO SAVE PREPROCESSED DATA (EPOCHS)
+# %%===========================================================================
+print("I define the path where I save the preprocessed epochs")
+# Epoched_Data_File = FolderPath + "/AllEpochs" + Subject + "-epo.fif"
+Epoched_4_File = FolderPath + "/Stim4Baselined" + Subject + "-epo.fif"
+Epoched_13_File = FolderPath + "/Stim13Baselined" + Subject + "-epo.fif"
+Epoched_24_File = FolderPath + "/Stim24Baselined" + Subject + "-epo.fif"
+Epoched_23_File = FolderPath + "/Stim23Baselined" + Subject + "-epo.fif"
+# =============================================================================
+
+# =============================================================================
+# SAVING THE EPOCHS
+# %%===========================================================================
+print("I save the preprocessed epochs")
+# Epochs_Baselined.save(fname = Epoched_Data_File, overwrite = False)
+Epochs_4 = Epochs["Stimulus/S  4"]
+Epochs_13 = Epochs["Stimulus/S 13"] 
+Epochs_24 = Epochs["Stimulus/S 24"]
+Epochs_23 = Epochs["Stimulus/S 23"]
+
+Epochs_4.save(fname = Epoched_4_File, overwrite = False)
+Epochs_13.save(fname = Epoched_13_File, overwrite = False)
+Epochs_24.save(fname = Epoched_24_File, overwrite = False)
+Epochs_23.save(fname = Epoched_23_File, overwrite = False)
+# =============================================================================
+
+# =============================================================================
+# LOADING PREPROCESSING EPOCHS
+# %%===========================================================================
+print("I load the preprocessed epochs")
+# PreprocessedEpochs = mne.read_epochs(Epoched_Data_File, proj=True, preload=True, verbose=None)
+PreprocessedEpoched_4 = mne.read_epochs(Epoched_4_File, proj = True, preload = True, verbose = None)
+PreprocessedEpoched_13 = mne.read_epochs(Epoched_13_File, proj = True, preload = True, verbose = None)
+PreprocessedEpoched_24 = mne.read_epochs(Epoched_24_File, proj = True, preload = True, verbose = None)
+PreprocessedEpoched_23 = mne.read_epochs(Epoched_23_File, proj = True, preload = True, verbose = None)
+# =============================================================================
+
+# =============================================================================
+# PATHS TO SAVE PREPROCESSED DATA (EVOKEDS)
+# %%===========================================================================
+print("I define the path where I will sage the evoked data")
+# PreprocessedEvoked_All_Baselined_Averaged_List_File = FolderPath + "/AllStimFileBaselinedAveragedList" + Subject + "-ave.fif"
+PreprocessedEvoked_4_Averaged_List_File = FolderPath + "/Stim4Baselined" + Subject + "-ave.fif"
+PreprocessedEvoked_13_Averaged_List_File = FolderPath + "/Stim13Baselined" + Subject + "-ave.fif"
+PreprocessedEvoked_24_Averaged_List_File = FolderPath + "/Stim24Baselined" + Subject + "-ave.fif"
+PreprocessedEvoked_23_Averaged_List_File = FolderPath + "/Stim23Baselined" + Subject + "-ave.fif"
+# =============================================================================
+
+# =============================================================================
+# EVOKING DATA
+# %%===========================================================================
+print("I evoke the epochs")
+# PreprocessedEvoked_All_Baselined_Averaged = PreprocessedEpochs.average() 
+PreprocessedEvoked_4_Averaged = PreprocessedEpoched_4.average() 
+PreprocessedEvoked_13_Averaged = PreprocessedEpoched_13.average() 
+PreprocessedEvoked_24_Averaged = PreprocessedEpoched_24.average()
+PreprocessedEvoked_23_Averaged = PreprocessedEpoched_23.average()
+
+# =============================================================================
+
+# =============================================================================
+# SAVING EVOKED DATA
+# %%===========================================================================
+print("I save the evoked data")
+# PreprocessedEvoked_All_Baselined_Averaged.save(fname = PreprocessedEvoked_All_Baselined_Averaged_List_File, overwrite = False)
+PreprocessedEvoked_4_Averaged.save(fname = PreprocessedEvoked_4_Averaged_List_File, overwrite = False)
+PreprocessedEvoked_13_Averaged.save(fname = PreprocessedEvoked_13_Averaged_List_File, overwrite = False)
+PreprocessedEvoked_24_Averaged.save(fname = PreprocessedEvoked_24_Averaged_List_File, overwrite = False)
+PreprocessedEvoked_23_Averaged.save(fname = PreprocessedEvoked_23_Averaged_List_File, overwrite = False)
+# =============================================================================
