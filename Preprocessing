@@ -18,17 +18,17 @@ from autoreject import AutoReject
 # =============================================================================
 # GENERAL PARAMETERS
 # %%===========================================================================
-Subject = "PatientID"
-FolderPath = f"Path1{Subject}"
-Index = "PatientIndex"
+Subject = "ID"
+FolderPath = f"D:/EEGData/{Subject}/Actichamp64/"
+Index = "000001"
 FilePath = FolderPath + Subject + Index + ".vhdr"
 
-SaveRoot = f"Path2{Subject}"
+SaveRoot = f"E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTRAWDATA/{Subject}/RestingState/"
 
 LFreq = 1
 HFreq = 30
-Tmin = -0.2
-Tmax = 3
+Tmin = 30
+Tmax = 180
 TargetSFreq = 250
 
 ICA_N_COMPONENTS = 30
@@ -39,35 +39,35 @@ ICA_FIT_PARAMS = None
 
 Event_ID = {
     "Stimulus/S  4": 4,
-    "Stimulus/S 13": 13,
     "Stimulus/S 24": 24,
+    "Stimulus/S 13": 13,
     "Stimulus/S 23": 23
 }
 
-ERRORSubjects = ["PatientID", "PatientID"]
+ERRORSubjects = ["ID", "ID"]
 
 PRISMESubjects = [
-    "PatientID", "PatientID", "PatientID", "PatientID",
-    "PatientID", "PatientID", "PatientID", "PatientID",
-    "PatientID", "PatientID", "PatientID", "PatientID"
+    "ID", "ID", "ID", "IDL",
+    "ID", "ID", "ID", "ID",
+    "ID", "ID", "ID", "ID"
 ]
-# =============================================================================
 
 # =============================================================================
 # 1) LOAD RAW DATA
 # %%===========================================================================
+
 RawData = mne.io.read_raw_brainvision(FilePath, preload=True)
 print("Raw loaded")
-# =============================================================================
 
 # =============================================================================
 # 2) SHAPING RAW DATA
 # %%===========================================================================
+
 for Patient in ERRORSubjects:
     if Patient in Subject:
-        if Patient == "PatientID":
+        if Patient == "LucileBENOIST":
             RawData.rename_channels({"AF1": "AF7", "AF2": "AF3"})
-        elif Patient == "PatientID":
+        elif Patient == "LucasLABEYRIE":
             RawData.rename_channels({"CZ": "Cz", "EOGD": "EOGR"})
 
 for Patient in PRISMESubjects:
@@ -81,7 +81,7 @@ for Patient in PRISMESubjects:
 
 mne.add_reference_channels(RawData, "Fz", copy=False)
 
-RawData.set_montage("easycap-M1", on_missing="ignore")
+RawData.set_montage("easycap-M1", on_missing="raise")
 
 FigSensors = RawData.plot_sensors(show_names=True)
 FigSensors.savefig(
@@ -93,11 +93,11 @@ FigSensors.savefig(
 RawData.set_eeg_reference(["CPz"], projection=False)
 
 FigRaw = RawData.plot(title="Original Signal", show=False)
-# =============================================================================
 
 # =============================================================================
 # 3) REST RE-REFERENCE
 # %%===========================================================================
+
 Sphere = mne.make_sphere_model("auto", "auto", RawData.info)
 Source = mne.setup_volume_source_space(
     sphere=Sphere,
@@ -113,11 +113,11 @@ Forward = mne.make_forward_solution(
 )
 
 RawData_RESTed = RawData.copy().set_eeg_reference("REST", forward=Forward)
-# =============================================================================
 
 # =============================================================================
 # 4) FILTERING
 # %%===========================================================================
+
 RawData_HighLowPassed = RawData_RESTed.filter(l_freq=LFreq, h_freq=HFreq)
 
 RawData_HighLowPassed.resample(TargetSFreq, npad="auto")
@@ -139,11 +139,11 @@ else:
     )
 
 FigNotched = RawData_Notched.plot(title="Notched Signal", show=False)
-# =============================================================================
 
 # =============================================================================
 # 5) EPOCHING
 # %%===========================================================================
+
 Events_from_annot, Event_dict = mne.events_from_annotations(RawData_Notched)
 
 Epochs = mne.Epochs(
@@ -157,73 +157,75 @@ Epochs = mne.Epochs(
 )
 
 FigEpochs = Epochs.plot(show=False)
-# =============================================================================
 
 # =============================================================================
 # =============================================================================
 # 6) BAD EPOCH REJECTION BEFORE ICA
 # %%===========================================================================
-NumberEpochsBeforeRejection = len(Epochs)
-print("Number of epochs before bad epoch rejection:", NumberEpochsBeforeRejection)
-
-# -------------------------------
-# 6a) AUTOREJECT (NO INTERPOLATION)
-# -------------------------------
-AR = AutoReject(
-    n_interpolate=[0],
-    consensus=[0.66],
-    random_state=42,
-    n_jobs=-1,
-    verbose=True
-)
-
-Epochs_clean, RejectLog = AR.fit_transform(Epochs, return_log=True)
-
-print("AutoReject done (NO interpolation)")
-
-# Rejected Indices by AutoReject
-RejectedEpochIndices_AutoReject = [
-    i for i, bad in enumerate(RejectLog.bad_epochs) if bad
-]
-
-print("Rejected epochs indices (AutoReject):", RejectedEpochIndices_AutoReject)
-print("Number of rejected epochs (AutoReject):", len(RejectedEpochIndices_AutoReject))
-print("Number of epochs after AutoReject:", len(Epochs_clean))
-
-# Saving of the AutoReject Model
-AR.save(
-    os.path.join(SaveRoot, f"{Subject}_autoreject_nointerp.h5"),
-    overwrite=True
-)
-
-# -------------------------------
-# 6b) MANUAL VISUAL REJECTION
-# -------------------------------
-Epochs = Epochs_clean.copy()
-
-NumberEpochsBeforeManualRejection = len(Epochs)
-print("Number of epochs before manual visual rejection:", NumberEpochsBeforeManualRejection)
-
-print("Visual inspection window opening...")
-print("Mark bad epochs manually, then close the figure to continue.")
-
-Epochs.plot(block=True)
-
-# Manually Rejected Epochs
-RejectedEpochIndices_Manual = [
-    i for i, DL in enumerate(Epochs.drop_log) if len(DL) > 0
-]
-
-print("Rejected epochs indices (manual visual rejection):", RejectedEpochIndices_Manual)
-print("Number of rejected epochs (manual visual rejection):", len(RejectedEpochIndices_Manual))
-print("Number of epochs after manual visual rejection:", len(Epochs))
-
-FigEpochsAfterReject = Epochs.plot(show=False)
+# =============================================================================
+# 
+# NumberEpochsBeforeRejection = len(Epochs)
+# print("Number of epochs before bad epoch rejection:", NumberEpochsBeforeRejection)
+# 
+# # -------------------------------
+# # 6a) AUTOREJECT (NO INTERPOLATION)
+# # -------------------------------
+# AR = AutoReject(
+#     n_interpolate=[0],
+#     consensus=[0.66],
+#     random_state=42,
+#     n_jobs=-1,
+#     verbose=True
+# )
+# 
+# Epochs_clean, RejectLog = AR.fit_transform(Epochs, return_log=True)
+# 
+# print("AutoReject done (NO interpolation)")
+# 
+# # indices rejetés par AutoReject
+# RejectedEpochIndices_AutoReject = [
+#     i for i, bad in enumerate(RejectLog.bad_epochs) if bad
+# ]
+# 
+# print("Rejected epochs indices (AutoReject):", RejectedEpochIndices_AutoReject)
+# print("Number of rejected epochs (AutoReject):", len(RejectedEpochIndices_AutoReject))
+# print("Number of epochs after AutoReject:", len(Epochs_clean))
+# 
+# # sauvegarde du modèle AutoReject
+# AR.save(
+#     os.path.join(SaveRoot, f"{Subject}_autoreject_nointerp.h5"),
+#     overwrite=True
+# )
+# 
+# # -------------------------------
+# # 6b) MANUAL VISUAL REJECTION
+# # -------------------------------
+# Epochs = Epochs_clean.copy()
+# 
+# NumberEpochsBeforeManualRejection = len(Epochs)
+# print("Number of epochs before manual visual rejection:", NumberEpochsBeforeManualRejection)
+# 
+# print("Visual inspection window opening...")
+# print("Mark bad epochs manually, then close the figure to continue.")
+# 
+# Epochs.plot(block=True)
+# 
+# # indices rejetés manuellement
+# RejectedEpochIndices_Manual = [
+#     i for i, DL in enumerate(Epochs.drop_log) if len(DL) > 0
+# ]
+# 
+# print("Rejected epochs indices (manual visual rejection):", RejectedEpochIndices_Manual)
+# print("Number of rejected epochs (manual visual rejection):", len(RejectedEpochIndices_Manual))
+# print("Number of epochs after manual visual rejection:", len(Epochs))
+# 
+# FigEpochsAfterReject = Epochs.plot(show=False)
 # =============================================================================
 
 # =============================================================================
 # 7) ICA #1 : BEFORE INTERPOLATION - BAD CHANNEL IDENTIFICATION
 # %%===========================================================================
+
 ICA_1 = ICA(
     n_components=ICA_N_COMPONENTS,
     method=ICA_METHOD,
@@ -258,12 +260,12 @@ ICA_1.save(
     os.path.join(SaveRoot, f"{Subject}_ICA1_before_interpolation-ica.fif"),
     overwrite=True
 )
-# =============================================================================
 
 # =============================================================================
 # 8) CHOOSE CHANNELS TO INTERPOLATE AFTER LOOKING AT ICA #1
 # %%===========================================================================
-CHANNELS_TO_INTERPOLATE = ["FT10", "F8"] # TO FILL
+
+CHANNELS_TO_INTERPOLATE = [] # TO FILL
 
 Epochs_Interp = Epochs.copy()
 
@@ -277,14 +279,13 @@ Epochs_Interp.info["bads"] = list(
 
 if len(ExistingChannelsToInterpolate) > 0:
     Epochs_Interp.interpolate_bads(reset_bads=True, verbose=False)
-    Epochs_Interp.set_eeg_reference("average", verbose=False)
 
 print("Interpolated channels:", ExistingChannelsToInterpolate)
-# =============================================================================
 
 # =============================================================================
 # 9) ICA #2 : AFTER INTERPOLATION
 # %%===========================================================================
+
 ICA_2 = ICA(
     n_components=ICA_N_COMPONENTS,
     method=ICA_METHOD,
@@ -319,11 +320,11 @@ ICA_2.save(
     os.path.join(SaveRoot, f"{Subject}_ICA2_after_interpolation-ica.fif"),
     overwrite=True
 )
-# =============================================================================
 
 # =============================================================================
 # 10) SAVE INDIVIDUAL COMPONENT PROPERTIES FOR ICA #2
 # %%===========================================================================
+
 ICA2_Properties_Figure = ICA_2.plot_properties(
     Epochs_Interp,
     picks=list(range(0, ICA_N_COMPONENTS, 1)),
@@ -339,11 +340,11 @@ for Index, Fig in enumerate(ICA2_Properties_Figure):
         dpi=300,
         bbox_inches="tight"
     )
-# =============================================================================
 
 # =============================================================================
 # 11) ICLABEL ON ICA #2
 # %%===========================================================================
+
 IcaLabels_2 = label_components(Epochs_Interp, ICA_2, method="iclabel")
 print(IcaLabels_2["labels"])
 
@@ -357,12 +358,12 @@ for i in range(0, len(IcaLabels_2["labels"])):
         ExcludedIndicesAuto_2.append(i)
 
 print("Auto-suggested bad ICA components at step 2:", ExcludedIndicesAuto_2)
-# =============================================================================
 
 # =============================================================================
 # 12) MANUAL EXCLUSION #1 AFTER ICA #2
 # %%===========================================================================
-MANUAL_EXCLUDE_STEP2 = [0, 1, 2, 3, 4, 5, 10, 14, 15, 17, 18, 19, 21, 22, 23, 25, 26, 27, 28, 29] # TO FILL
+
+MANUAL_EXCLUDE_STEP2 = [] # TO FILL
 
 InvalidManualExclude2 = [
     idx for idx in MANUAL_EXCLUDE_STEP2
@@ -394,20 +395,20 @@ if len(MANUAL_EXCLUDE_STEP2) > 0:
             dpi=300,
             bbox_inches="tight"
         )
-# =============================================================================
 
 # =============================================================================
 # 13) APPLY ICA #2
 # %%===========================================================================
+
 Epochs_After_ICA2 = Epochs_Interp.copy()
 ICA_2.apply(Epochs_After_ICA2)
 
 print("ICA #2 applied")
-# =============================================================================
 
 # =============================================================================
 # 14) ICA #3 : AFTER FIRST MANUAL CLEANING
 # %%===========================================================================
+
 ICA_3 = ICA(
     n_components=ICA_N_COMPONENTS,
     method=ICA_METHOD,
@@ -442,11 +443,11 @@ ICA_3.save(
     os.path.join(SaveRoot, f"{Subject}_ICA3_before_find_bads_eog-ica.fif"),
     overwrite=True
 )
-# =============================================================================
 
 # =============================================================================
 # 15) FIND_BADS_EOG ON ICA #3
 # %%===========================================================================
+
 EOG_Components = []
 
 for EOGChannel in ["Fp1", "Fp2"]:
@@ -460,7 +461,6 @@ for EOGChannel in ["Fp1", "Fp2"]:
 
 EOG_Components = sorted(list(set(EOG_Components)))
 print("Auto-detected EOG components:", EOG_Components)
-# =============================================================================
 
 # =============================================================================
 # 16) PLOT FOR SELECTING LAST BAD COMPONENTS
@@ -471,7 +471,6 @@ FigICA3 = ICA_3.plot_components(
     ncols=6,
     show=False
     )
-# =============================================================================
 
 # =============================================================================
 # 17) MANUAL COMPLEMENT AFTER FIND_BADS_EOG
@@ -511,20 +510,20 @@ if len(FinalExcludeICA3) > 0:
             dpi=300,
             bbox_inches="tight"
         )
-# =============================================================================
 
 # =============================================================================
 # 18) APPLY ICA #3
 # %%===========================================================================
+
 Epochs_FinalClean = Epochs_After_ICA2.copy()
 ICA_3.apply(Epochs_FinalClean)
 
 print("ICA #3 applied")
-# =============================================================================
 
 # =============================================================================
 # 19) ICA #4 FINAL DOCUMENTATION
 # %%===========================================================================
+
 ICA_4 = ICA(
     n_components=ICA_N_COMPONENTS,
     method=ICA_METHOD,
@@ -559,36 +558,23 @@ ICA_4.save(
     os.path.join(SaveRoot, f"{Subject}_ICA4_final_documentation-ica.fif"),
     overwrite=True
 )
-# =============================================================================
 
 # =============================================================================
 # 20) FINAL SAVE OF EPOCHS
 # %%===========================================================================
+
 FinalEpochsFile = os.path.join(
     SaveRoot,
-    f"{Subject}_PreBaseline_MW_final_cleaned-epo.fif"
+    f"{Subject}_PreBaseline_final_cleaned-epo.fif"
 )
 Epochs_FinalClean.save(FinalEpochsFile, overwrite=True)
 
 print("Final cleaned epochs saved")
-# =============================================================================
-
-# =============================================================================
-# 21) FINAL SAVE OF EVOKEDS
-# %%===========================================================================
-EvokedFinal = Epochs_FinalClean.average()
-EvokedFinalFile = os.path.join(
-    SaveRoot,
-    f"{Subject}_PreBaseline_MW_final_cleaned-ave.fif"
-)
-EvokedFinal.save(EvokedFinalFile, overwrite=True)
-
-print("Final evoked saved")
-# =============================================================================
 
 # =============================================================================
 # 22) SAVE LOG
 # %%===========================================================================
+
 ProcessingLog = {
     "Subject": Subject,
     "FilePath": FilePath,
@@ -627,4 +613,4 @@ with open(
 
 print("Processing log saved")
 print("Done.")
-# =============================================================================
+
