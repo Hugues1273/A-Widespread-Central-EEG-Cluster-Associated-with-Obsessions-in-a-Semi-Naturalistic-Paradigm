@@ -1,30 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-Written by Hugues Lamothe
-Article: A Widespread Central EEG Cluster Associated with Obsessions Revealed 
-By A Semi-Naturalistic Symptom Provocation Paradigm
+Created on Mon Jan  5 17:06:28 2026
+
+@author: lamot
 """
 
 # =============================================================================
-# IMPORTS
+# !!! First, I import libraries
 # %%===========================================================================
 import os
 import numpy as np
 import mne
 from mne.channels import find_ch_adjacency
-from mne.stats import spatio_temporal_cluster_1samp_test
+from mne.stats import (spatio_temporal_cluster_1samp_test, f_mway_rm, f_threshold_mway_rm, spatio_temporal_cluster_test)
 from scipy import stats
 import matplotlib.pyplot as plt
 # =============================================================================
 
 # =============================================================================
-# LOADING EVOKEDS FOR GRAPHS
+# I load/read the evokeds for the graph only
 # %%===========================================================================
 print("I load and read the evokeds")
 
-General_Path = "Path"
+General_Path = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTRAWDATA/"
 Subjects_List = sorted(os.listdir(General_Path))
 
+# Dictionnaire par sujet pour garantir l'appariement
 Evokeds_by_subject = {}
 
 for Subject in Subjects_List:
@@ -40,25 +41,58 @@ for Subject in Subjects_List:
     generic_evoked = None
     personalized_evoked = None
 
+    # -------------------------------
+    # Find matching files
+    # -------------------------------
+    neutral_files = []
+    generic_files = []
+    personalized_files = []
+    
     for File in Files:
-        if "-ave.fif" not in File:
+        if not File.endswith("-ave.fif"):
             continue
-
-        File_Path = os.path.join(Files_Path, File)
-
+        
         if "Stim10" in File and "Baselined" in File:
-            Evoked = mne.read_evokeds(File_Path)
-            neutral_evoked = Evoked[0]
-
+            neutral_files.append(File)
+            
         elif "Stim5" in File and "Baselined" in File:
-            Evoked = mne.read_evokeds(File_Path)
-            generic_evoked = Evoked[0]
-            print(File)
-
+            generic_files.append(File)
+                
         elif "Stim14" in File and "Baselined" in File:
-            Evoked = mne.read_evokeds(File_Path)
-            personalized_evoked = Evoked[0]
+            personalized_files.append(File)
 
+    # -------------------------------
+    # Verify uniqueness
+    # -------------------------------
+    for Condition, Matches in [
+            ("Neutral", neutral_files),
+            ("Generic", generic_files),
+            ("Personalized", personalized_files)
+            ]:
+        if len(Matches) != 1:
+            raise RuntimeError(
+                f"{Subject}: {len(Matches)} files found for {Condition}: {Matches}"
+                )
+
+    # -------------------------------
+    # Load evokeds
+    # -------------------------------
+    neutral_evoked = mne.read_evokeds(
+        os.path.join(Files_Path, neutral_files[0]),
+        proj=False
+        )[0]
+    
+    generic_evoked = mne.read_evokeds(
+        os.path.join(Files_Path, generic_files[0]),
+        proj=False
+        )[0]
+    
+    personalized_evoked = mne.read_evokeds(
+        os.path.join(Files_Path, personalized_files[0]),
+        proj=False
+        )[0]
+
+    # garder seulement les sujets complets dans les 3 conditions
     if (neutral_evoked is not None and
         generic_evoked is not None and
         personalized_evoked is not None):
@@ -84,6 +118,35 @@ print(f"N included subjects = {len(Included_Subjects)}")
 
 assert len(NeutralEvokeds) == len(GenericEvokeds) == len(PersonalizedEvokeds), \
     "Les listes de conditions n'ont pas la même longueur."
+
+print("Subject order is guaranteed identical across the 3 conditions.")
+
+ReferenceEvoked = NeutralEvokeds[0]
+
+for Subject, Neu, Gen, Per in zip(
+    Included_Subjects,
+    NeutralEvokeds,
+    GenericEvokeds,
+    PersonalizedEvokeds
+):
+    for ConditionName, Evoked in [
+        ("Neutral", Neu),
+        ("Generic", Gen),
+        ("Personalized", Per)
+    ]:
+        assert Evoked.ch_names == ReferenceEvoked.ch_names, (
+            f"Channel names/order mismatch: {Subject}, {ConditionName}"
+        )
+
+        assert np.array_equal(Evoked.times, ReferenceEvoked.times), (
+            f"Time vector mismatch: {Subject}, {ConditionName}"
+        )
+
+        assert Evoked.info["sfreq"] == ReferenceEvoked.info["sfreq"], (
+            f"Sampling-frequency mismatch: {Subject}, {ConditionName}"
+        )
+
+print("All evokeds have identical channels, channel order and times.")
 # =============================================================================
 
 # =============================================================================
@@ -91,9 +154,7 @@ assert len(NeutralEvokeds) == len(GenericEvokeds) == len(PersonalizedEvokeds), \
 # %%===========================================================================
 print("I do the omnibus 3-condition repeated-measures ANOVA")
 
-from mne.stats import spatio_temporal_cluster_test, f_mway_rm
-
-Pick = ["eeg"]
+Pick = ["eeg"]   # ou Pick = "eeg"
 
 alpha_cluster = 0.05
 n_permutations = 5000
@@ -113,7 +174,6 @@ print(f"N Personalized = {n_per}")
 assert n_neu == n_gen == n_per, \
     "Les trois conditions n'ont pas le même nombre de sujets."
 
-# --- Build arrays : (n_subjects, n_channels, n_times) ---
 X_neu = np.array([ev.copy().pick(Pick).data for ev in NeutralEvokeds])
 X_gen = np.array([ev.copy().pick(Pick).data for ev in GenericEvokeds])
 X_per = np.array([ev.copy().pick(Pick).data for ev in PersonalizedEvokeds])
@@ -123,13 +183,11 @@ print("X_neu =", X_neu.shape)
 print("X_gen =", X_gen.shape)
 print("X_per =", X_per.shape)
 
-# --- Adjacency MUST match picked channels ---
 ev_template = NeutralEvokeds[0].copy().pick(Pick)
 info_pick = ev_template.info
 Adjacency, ch_names = find_ch_adjacency(info_pick, ch_type="eeg")
 print("Adjacency shape =", Adjacency.shape)
 
-# --- MNE expects each condition as (n_subjects, n_times, n_channels) ---
 X_neu = np.transpose(X_neu, (0, 2, 1))
 X_gen = np.transpose(X_gen, (0, 2, 1))
 X_per = np.transpose(X_per, (0, 2, 1))
@@ -139,7 +197,6 @@ print("X_neu =", X_neu.shape)
 print("X_gen =", X_gen.shape)
 print("X_per =", X_per.shape)
 
-# --- Reshaping data for f_mway_rm ---
 def stat_fun(*args):
     data = np.swapaxes(args, 1, 0)
     # shape -> (n_subjects, n_conditions, n_times, n_channels)
@@ -152,22 +209,26 @@ def stat_fun(*args):
         return_pvals=False
     )[0]
 
-# --- Run cluster permutation ANOVA ---
-F_obs, clusters, p_values, H0 = spatio_temporal_cluster_test(
-    [X_neu, X_gen, X_per],
-    stat_fun = stat_fun,
-    adjacency = Adjacency,
-    n_permutations = n_permutations,
-    threshold = None,
-    tail = 1,
-    n_jobs = -1,
-    seed = seed,
-    out_type = "mask",
-    verbose = True
+f_threshold = f_threshold_mway_rm(
+    n_subjects=n_neu,
+    factor_levels=[3],
+    effects="A",
+    pvalue=0.05
 )
 
-# --- Build significance mask from clusters + p_values ---
-sig_mask_anova = np.zeros(F_obs.shape, dtype = bool)  # (n_times, n_channels)
+F_obs, clusters, p_values, H0 = spatio_temporal_cluster_test(
+    [X_neu, X_gen, X_per],
+    stat_fun=stat_fun,
+    adjacency=Adjacency,
+    n_permutations=n_permutations,
+    threshold=f_threshold,
+    tail=1,
+    n_jobs=-1,
+    seed=seed,
+    out_type="mask",
+    verbose=True
+)
+sig_mask_anova = np.zeros(F_obs.shape, dtype=bool)  # (n_times, n_channels)
 for cl_mask, p in zip(clusters, p_values):
     if p < alpha_cluster:
         sig_mask_anova |= cl_mask
@@ -175,7 +236,6 @@ for cl_mask, p in zip(clusters, p_values):
 times_anova = ev_template.times
 ch_names_anova = np.array(ev_template.ch_names)
 
-# --- Peak global du F observé ---
 t_peak_all_anova, ch_peak_all_anova = np.unravel_index(
     np.argmax(F_obs), F_obs.shape
 )
@@ -235,21 +295,21 @@ else:
 # =============================================================================
 
 # =============================================================================
-# CLUSTER-BASED PERMUTATION TEST 
+# Cluster-based permutation test (classique, sans TFCE) + masque significatif
 # %%===========================================================================
 print("I do the statistics")
 
 Evoked1 = PersonalizedEvokeds          # TO ADAPT
 Evoked2 = GenericEvokeds               # TO ADAPT (ou PersonalizedEvokeds)
 
+# Pick = "eeg"  # pour toutes les électrodes EEG
 Pick = ["eeg"]
 
-alpha_cluster_forming = 0.05   
+alpha_cluster_forming = 0.05  
 alpha_cluster = 0.05           
 n_permutations = 5000
-tail = 0                       # 0 = two-sided ; 1 = Evoked1 > Evoked2 ; -1 = Evoked1 < Evoked2
+tail = 0                    
 seed = 1
-
 
 X = []
 for Ev1, Ev2 in zip(Evoked1, Evoked2):
@@ -265,11 +325,9 @@ info_pick = ev_template.info
 Adjacency, ch_names = find_ch_adjacency(info_pick, ch_type="eeg")
 print("Adjacency shape =", Adjacency.shape)
 
-# --- MNE expects (n_subjects, n_times, n_channels) ---
 X = np.transpose(X, (0, 2, 1))
 print("X shape for MNE (n_subjects, n_times, n_channels) =", X.shape)
 
-# --- Classic cluster-forming t-threshold ---
 n_subjects = X.shape[0]
 df = n_subjects - 1
 if tail == 0:
@@ -278,12 +336,11 @@ else:
     t_threshold = stats.t.ppf(1 - alpha_cluster_forming, df)      # one-sided
 print(f"Cluster-forming threshold t = {t_threshold:.3f} (df={df}, alpha={alpha_cluster_forming}, tail={tail})")
 
-# --- Run cluster permutation test ---
 T_obs, clusters, p_values, H0 = spatio_temporal_cluster_1samp_test(
     X,
     adjacency=Adjacency,
     n_permutations=n_permutations,
-    threshold=t_threshold,   
+    threshold=t_threshold,   # <-- PAS TFCE
     tail=tail,
     n_jobs=-1,
     seed=seed,
@@ -311,6 +368,58 @@ for i, p in enumerate(p_values):
 # =============================================================================
 
 # =============================================================================
+# ELECTRODE RANKING FOR EACH SIGNIFICANT CLUSTER
+# %%===========================================================================
+print("Ranking electrodes for each significant cluster")
+
+ch_names = np.array(ev_template.ch_names)
+
+sig_cluster_indices = np.where(p_values < alpha_cluster)[0]
+
+if len(sig_cluster_indices) == 0:
+    print("No significant clusters found.")
+else:
+    print(f"Number of significant clusters = {len(sig_cluster_indices)}")
+
+    for k, cl_idx in enumerate(sig_cluster_indices, start=1):
+        cl_mask = clusters[cl_idx]
+        p_cl = float(p_values[cl_idx])
+
+        n_timepoints_cluster = cl_mask.sum(axis=0)
+
+        abs_t_cluster = np.zeros(len(ch_names), dtype=float)
+        for ch_i in range(len(ch_names)):
+            abs_t_cluster[ch_i] = np.abs(T_obs[cl_mask[:, ch_i], ch_i]).sum()
+
+        t_inds = np.where(np.any(cl_mask, axis=1))[0]
+        tmin_cl = times[t_inds.min()]
+        tmax_cl = times[t_inds.max()]
+
+        sort_idx = np.lexsort((
+            -abs_t_cluster,
+            -n_timepoints_cluster
+        ))
+
+        print("\n" + "="*70)
+        print(f"\nSignificant cluster #{k}")
+        print(f"Cluster index: {cl_idx}")
+        print(f"Cluster p-value: {p_cl:.4f}")
+        print(f"Time window: {tmin_cl:.3f}–{tmax_cl:.3f} s")
+        print("Rank | Channel | TimePtsInCluster | SumAbsT")
+
+        rank = 1
+        for idx in sort_idx:
+            if n_timepoints_cluster[idx] > 0:
+                print(
+                    f"{rank:>4} | "
+                    f"{ch_names[idx]:>7} | "
+                    f"{n_timepoints_cluster[idx]:>16d} | "
+                    f"{abs_t_cluster[idx]:>7.2f}"
+                )
+                rank += 1
+# =============================================================================
+
+# =============================================================================
 # SUMMARY OF ALL SIGNIFICANT CLUSTERS
 # %%===========================================================================
 
@@ -327,11 +436,9 @@ for i, cl_idx in enumerate(sig_cluster_inds, start=1):
     tmin_c = times[t_in_cluster.min()]
     tmax_c = times[t_in_cluster.max()]
 
-    # channels
     ch_in_cluster = np.where(np.any(cl_mask, axis=0))[0]
     ch_names_cluster = ch_names[ch_in_cluster]
 
-    # peak within this cluster
     masked_absT_cluster = np.abs(T_obs) * cl_mask
     t_peak_c, ch_peak_c = np.unravel_index(
         np.argmax(masked_absT_cluster),
@@ -355,7 +462,7 @@ for i, cl_idx in enumerate(sig_cluster_inds, start=1):
 # =============================================================================
 
 # =============================================================================
-# PLOT: T-MAP
+# 5) PLOT: Une T-map séparée pour chaque cluster significatif
 # %%===========================================================================
 print("Plot: one T-map per significant cluster")
 
@@ -364,9 +471,9 @@ from matplotlib.collections import PatchCollection
 
 sig_cluster_inds = np.where(p_values < alpha_cluster)[0]
 
-# -------------
-# IF NO CLUSTER
-# -------------
+# ============================================================
+# CAS 1 : AUCUN CLUSTER → fallback = T-map globale au pic
+# ============================================================
 if len(sig_cluster_inds) == 0:
 
     print("No significant clusters → plotting global T-map at peak")
@@ -433,10 +540,9 @@ if len(sig_cluster_inds) == 0:
     fig.tight_layout()
     plt.show()
 
-
-# -----------------
-# IF CLUSTERS EXIST
-# -----------------
+# ============================================================
+# CAS 2 : CLUSTERS PRÉSENTS → code habituel
+# ============================================================
 else:
     for cluster_number, cl_idx in enumerate(sig_cluster_inds, start=1):
 
@@ -551,7 +657,9 @@ else:
 # =============================================================================
 
 # =============================================================================
-# TOPOMAPS 
+# 6) TOPOMAPS PAR CLUSTER SIGNIFICATIF
+#    A) topomap au pic du cluster
+#    B) topomap moyenne sur la fenêtre temporelle du cluster
 # %%===========================================================================
 print("Plot: topomaps for each significant cluster")
 
@@ -560,7 +668,6 @@ sig_cluster_inds = np.where(p_values < alpha_cluster)[0]
 if len(sig_cluster_inds) == 0:
     print("No significant clusters to plot as topomaps.")
 
-    # fallback : topomap at the global peak -> |T|
     data_topo = T_obs[t_peak_all, :]
 
     vmax = np.max(np.abs(data_topo))
@@ -606,9 +713,9 @@ else:
             masked_absT_cluster.shape
         )
 
-        # -------------------------
-        # A) TOPOMAP AT PEAK
-        # -------------------------
+        # =====================================================================
+        # A) TOPO AU PIC DU CLUSTER
+        # =====================================================================
         data_topo_peak = T_obs[t_peak_c, :]
 
         mask_peak = cl_mask[t_peak_c, :]
@@ -649,12 +756,11 @@ else:
         plt.tight_layout()
         plt.show()
 
-        # ------------------------------------------
-        # B) MEAN TOPOMAP
-        # ------------------------------------------
+        # =====================================================================
+        # B) TOPO MOYENNE SUR LA FENÊTRE DU CLUSTER
+        # =====================================================================
         topo_mean = T_obs[t_in_cluster, :].mean(axis=0)
 
-        # masque spatial = électrodes impliquées au moins une fois dans le cluster
         mask_cluster = np.zeros(len(ch_names), dtype=bool)
         mask_cluster[ch_in_cluster] = True
 
@@ -695,13 +801,13 @@ else:
 # =============================================================================
 
 # =============================================================================
-# ERP FOR EACH CLUSTER
+# 7) ERP PAR CLUSTER SIGNIFICATIF
+#    ROI = électrodes appartenant au cluster
 # %%===========================================================================
 print("Plot: ERP on ROI for each significant cluster")
 
 sig_cluster_inds = np.where(p_values < alpha_cluster)[0]
 
-# Labels conditions
 if Evoked1 == NeutralEvokeds:
     Label1 = "Neutral"
 elif Evoked1 == GenericEvokeds:
@@ -806,17 +912,17 @@ for cluster_number, roi_ch_names, span, title_extra in clusters_to_plot:
 # =============================================================================
 
 # =============================================================================
-# ERP moyenne des électrodes choisies + choix du cluster à afficher
+# 8) ERP moyenne des électrodes choisies + choix du cluster à afficher
 # %%===========================================================================
 print("Plot: ERP averaged across user-selected channels with selected cluster")
 
-# ----------
-# PARAMETERS
-# ----------
-user_ch_names = ["CP2"]       
+# -------------------------------------------------------------------------
+# PARAMÈTRES À MODIFIER
+# -------------------------------------------------------------------------
+user_ch_names = []     
 user_cluster_number = 1      
+# -------------------------------------------------------------------------
 
-# --- Labels conditions ---
 if Evoked1 == NeutralEvokeds:
     Label1 = "Neutral"
 elif Evoked1 == GenericEvokeds:
@@ -831,7 +937,6 @@ elif Evoked2 == GenericEvokeds:
 else:
     Label2 = "Personalized"
 
-# --- Significative clusters ---
 sig_cluster_inds = np.where(p_values < alpha_cluster)[0]
 
 if len(sig_cluster_inds) == 0:
@@ -873,7 +978,6 @@ else:
     print("Channels in selected cluster:")
     print(", ".join(ch_names_cluster))
 
-# --- Electrode checks ---
 available = set(ch_names)
 user_ch_names_ok = [ch for ch in user_ch_names if ch in available]
 
@@ -898,7 +1002,6 @@ else:
             )
             print(", ".join(user_ch_not_in_cluster))
 
-    # --- Data extraction ---
     Y1, Y2 = [], []
 
     for ev1, ev2 in zip(Evoked1, Evoked2):
@@ -919,7 +1022,6 @@ else:
     sem1 = Y1.std(axis=0, ddof=1) / np.sqrt(Y1.shape[0]) * scale
     sem2 = Y2.std(axis=0, ddof=1) / np.sqrt(Y2.shape[0]) * scale
 
-    # --- Plot ---
     fig, ax = plt.subplots(figsize=(9, 5))
 
     ax.plot(times, m1, label=Label1, linewidth=2)
@@ -947,7 +1049,113 @@ else:
 # =============================================================================
 
 # =============================================================================
-# PLOT: T-MAP FOR EACH CLUSTER
+# 9) FRISES TOPOGRAPHIQUES POUR TOUS LES CLUSTERS SIGNIFICATIFS
+# %%===========================================================================
+print("Plot: chronological topomaps for all significant clusters")
+
+topomap_times_ms = [0, 150, 300, 450, 600, 750, 900]   # <<< A MODIFIER
+
+sig_cluster_inds = np.where(p_values < alpha_cluster)[0]
+
+if len(sig_cluster_inds) == 0:
+    print("No significant clusters to plot.")
+
+else:
+    for cluster_number, cl_idx in enumerate(sig_cluster_inds, start=1):
+
+        cl_mask = clusters[cl_idx]  # shape = (n_times, n_channels)
+        p_cl = float(p_values[cl_idx])
+
+        t_in_cluster = np.where(np.any(cl_mask, axis=1))[0]
+        tmin_cl = times[t_in_cluster.min()]
+        tmax_cl = times[t_in_cluster.max()]
+
+        print(
+            f"Plotting cluster {cluster_number} "
+            f"(index={cl_idx}, p={p_cl:.4f}, "
+            f"{tmin_cl:.3f}–{tmax_cl:.3f}s)"
+        )
+
+        topomap_times_s = np.array(topomap_times_ms, dtype=float) / 1000.0
+
+        valid_mask = (
+            (topomap_times_s >= times[0]) &
+            (topomap_times_s <= times[-1]) &
+            (topomap_times_s >= tmin_cl) &
+            (topomap_times_s <= tmax_cl)
+        )
+
+        valid_times_s = topomap_times_s[valid_mask]
+        valid_times_ms = list(np.array(topomap_times_ms)[valid_mask])
+
+        if len(valid_times_s) == 0:
+            print(
+                f"WARNING: aucun temps demandé ne tombe dans le cluster "
+                f"{cluster_number}. Cluster ignoré pour la frise."
+            )
+            continue
+
+        topo_inds = [np.argmin(np.abs(times - t)) for t in valid_times_s]
+
+        n_topos = len(topo_inds)
+
+        fig, axes = plt.subplots(
+            1,
+            n_topos,
+            figsize=(3 * n_topos, 3.2)
+        )
+
+        axes = np.atleast_1d(axes)
+
+        vmax = np.max(np.abs(T_obs[topo_inds, :]))
+        vlim = (-vmax, vmax) if vmax > 0 else (None, None)
+
+        for ax, t_idx, requested_ms in zip(axes, topo_inds, valid_times_ms):
+
+            actual_ms = times[t_idx] * 1000
+
+            mask_at_topo = cl_mask[t_idx, :]
+
+            if not np.any(mask_at_topo):
+                mask_at_topo = None
+
+            mne.viz.plot_topomap(
+                T_obs[t_idx, :],
+                ev_template.info,
+                axes=ax,
+                show=False,
+                cmap="RdBu_r",
+                vlim=vlim,
+                mask=mask_at_topo,
+                mask_params=dict(
+                    marker="o",
+                    markerfacecolor="none",
+                    markeredgecolor="black",
+                    linewidth=1.2,
+                    markersize=6
+                ) if mask_at_topo is not None else None,
+                contours=0,
+                sensors=True
+            )
+
+            ax.set_title(
+                f"{requested_ms} ms\n"
+                f"actual {actual_ms:.0f} ms",
+                fontsize=9
+            )
+
+        fig.suptitle(
+            f"Cluster {cluster_number} | index={cl_idx} | "
+            f"p={p_cl:.4f} | {tmin_cl:.3f}–{tmax_cl:.3f} s",
+            fontsize=12
+        )
+
+        plt.tight_layout()
+        plt.show()
+# =============================================================================
+
+# =============================================================================
+# 10) PLOT: T-map automatique pour chaque cluster significatif
 # %%===========================================================================
 print("Plot: T-map for each significant cluster")
 
@@ -965,12 +1173,10 @@ else:
         cl_mask = clusters[cl_idx]  # shape = (n_times, n_channels)
         p_cl = float(p_values[cl_idx])
 
-        # --- Temporal window ---
         t_in_cluster = np.where(np.any(cl_mask, axis=1))[0]
         tmin_plot = times[t_in_cluster.min()]
         tmax_plot = times[t_in_cluster.max()]
 
-        # --- Cluster electrodes ---
         ch_in_cluster = np.where(np.any(cl_mask, axis=0))[0]
         selected_channels = list(ch_names[ch_in_cluster])
 
@@ -981,7 +1187,6 @@ else:
         )
         print("Channels:")
         print(", ".join(selected_channels))
-
 
         time_mask = (times >= tmin_plot) & (times <= tmax_plot)
         time_indices = np.where(time_mask)[0]
@@ -1052,13 +1257,11 @@ else:
             )
             ax.add_collection(pc)
 
-        # --- Axe X ---
         n_xticks = min(6, max(2, len(times_sel)))
         xt = np.linspace(times_sel[0], times_sel[-1], n_xticks)
         ax.set_xticks(xt)
         ax.set_xticklabels([f"{x:.3f}" for x in xt])
 
-        # --- Axe Y ---
         ax.set_yticks(np.arange(len(selected_channels)) + 0.5)
         ax.set_yticklabels(selected_channels)
 
@@ -1086,7 +1289,7 @@ else:
 # %%===========================================================================
 print("Plot: empty topography with one selected electrode")
 
-electrode_for_topomap_marker = "CP2"  
+electrode_for_topomap_marker = "CP2"   # <<< MODIFIER
 
 if electrode_for_topomap_marker not in ch_names:
     raise ValueError(
