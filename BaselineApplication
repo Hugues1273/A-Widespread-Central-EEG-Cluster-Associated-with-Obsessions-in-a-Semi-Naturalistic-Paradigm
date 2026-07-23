@@ -23,7 +23,7 @@ import mne
 # %%===========================================================================
 # Then, I load the data
 print("I define the path")
-Subject = "KyllianSERGENT"
+Subject = "ID"
 FolderPath = f"E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTRAWDATA\{Subject}/Task"
 # =============================================================================
 
@@ -38,10 +38,8 @@ Epochs.info
 # =============================================================================
 # I do the baseline correction
 # %%===========================================================================
-# I either apply the baseline correction on all the epoched data together
 Baseline = (-0.2, 0.0)
 print("I do the baseline correction")
-# Epochs_Baselined = Epochs_ICAApplied.apply_baseline(Baseline)
 
 # Or I apply the baseline correction to each event separetely
 Epochs_5 = Epochs["Stimulus/S  5"] # Generic
@@ -56,7 +54,6 @@ Epochs_14_Baselined = Epochs_14.apply_baseline(Baseline)
 # I set the paths where I will save the preprocessed epochs
 # %%===========================================================================
 print("I define the path where I save the preprocessed epochs")
-# Epoched_Data_File = FolderPath + "/AllEpochs" + Subject + "-epo.fif"
 Epoched_5_Baselined_File = FolderPath + "/{}_Stim5_200MSBaselined".format(Subject) + Subject + "-epo.fif"
 Epoched_10_Baselined_File = FolderPath + "/{}_Stim10_200MSBaselined".format(Subject) + Subject + "-epo.fif"
 Epoched_14_Baselined_File = FolderPath + "/{}_Stim14_200MSBaselined".format(Subject) + Subject + "-epo.fif"
@@ -66,7 +63,6 @@ Epoched_14_Baselined_File = FolderPath + "/{}_Stim14_200MSBaselined".format(Subj
 # I save the preprocessed epoched data
 # %%===========================================================================
 print("I save the preprocessed epochs")
-# Epochs_Baselined.save(fname = Epoched_Data_File, overwrite = False)
 Epochs_5_Baselined.save(fname = Epoched_5_Baselined_File, overwrite = False)
 Epochs_10_Baselined.save(fname = Epoched_10_Baselined_File, overwrite = False)
 Epochs_14_Baselined.save(fname = Epoched_14_Baselined_File, overwrite = False)
@@ -76,7 +72,6 @@ Epochs_14_Baselined.save(fname = Epoched_14_Baselined_File, overwrite = False)
 # I now load the preprocessed epoched data
 # %%===========================================================================
 print("I load the preprocessed epochs")
-# PreprocessedEpochs = mne.read_epochs(Epoched_Data_File, proj=True, preload=True, verbose=None)
 PreprocessedEpoched_5_Baselined = mne.read_epochs(Epoched_5_Baselined_File, proj = True, preload = True, verbose = None)
 PreprocessedEpoched_10_Baselined = mne.read_epochs(Epoched_10_Baselined_File, proj = True, preload = True, verbose = None)
 PreprocessedEpoched_14_Baselined = mne.read_epochs(Epoched_14_Baselined_File, proj = True, preload = True, verbose = None)
@@ -86,7 +81,6 @@ PreprocessedEpoched_14_Baselined = mne.read_epochs(Epoched_14_Baselined_File, pr
 # I set the paths where I will save the evoked data
 # %%===========================================================================
 print("I define the path where I will sage the evoked data")
-# PreprocessedEvoked_All_Baselined_Averaged_List_File = FolderPath + "/AllStimFileBaselinedAveragedList" + Subject + "-ave.fif"
 PreprocessedEvoked_5_Baselined_Averaged_List_File = FolderPath + "/{}_Stim5_200MSBaselined".format(Subject) + Subject + "-ave.fif"
 PreprocessedEvoked_10_Baselined_Averaged_List_File = FolderPath + "/{}_Stim10_200MSBaselined".format(Subject) + Subject + "-ave.fif"
 PreprocessedEvoked_14_Baselined_Averaged_List_File = FolderPath + "/{}_Stim14_200MSBaselined".format(Subject) + Subject + "-ave.fif"
@@ -96,7 +90,6 @@ PreprocessedEvoked_14_Baselined_Averaged_List_File = FolderPath + "/{}_Stim14_20
 # I evoke (aka average) the data
 # %%===========================================================================
 print("I evoke the epochs")
-# PreprocessedEvoked_All_Baselined_Averaged = PreprocessedEpochs.average() 
 PreprocessedEvoked_5_Baselined_Averaged = PreprocessedEpoched_5_Baselined.average() 
 PreprocessedEvoked_10_Baselined_Averaged = PreprocessedEpoched_10_Baselined.average() 
 PreprocessedEvoked_14_Baselined_Averaged = PreprocessedEpoched_14_Baselined.average()
@@ -106,7 +99,6 @@ PreprocessedEvoked_14_Baselined_Averaged = PreprocessedEpoched_14_Baselined.aver
 # I save the evoked data 
 # %%===========================================================================
 print("I save the evoked data")
-# PreprocessedEvoked_All_Baselined_Averaged.save(fname = PreprocessedEvoked_All_Baselined_Averaged_List_File, overwrite = False)
 PreprocessedEvoked_5_Baselined_Averaged.save(fname = PreprocessedEvoked_5_Baselined_Averaged_List_File, overwrite = False)
 PreprocessedEvoked_10_Baselined_Averaged.save(fname = PreprocessedEvoked_10_Baselined_Averaged_List_File, overwrite = False)
 PreprocessedEvoked_14_Baselined_Averaged.save(fname = PreprocessedEvoked_14_Baselined_Averaged_List_File, overwrite = False)
