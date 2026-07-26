@@ -1,0 +1,506 @@
+# -*- coding: utf-8 -*-
+
+# =============================================================================
+# QT SETTINGS - AVANT IMPORT/UTILISATION DE PYVISTAQT
+# =============================================================================
+
+import os
+
+# Version propre : pas de faux module darkdetect, pas de filtre stdout/stderr.
+# Si ton environnement affiche encore le message, installer une fois :
+# pip install darkdetect
+os.environ["QT_API"] = "pyqt5"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+import numpy as np
+import mne
+from mne.minimum_norm import apply_inverse, make_inverse_operator
+
+# =============================================================================
+# PATHS
+# =============================================================================
+
+SubjectPath = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTRAWDATA"
+SubjectsDir = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/GlobalResults/SourceLocalization"
+FigureDir = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTFIGURE"
+
+os.makedirs(FigureDir, exist_ok=True)
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+
+mne.viz.set_3d_backend("pyvistaqt")
+
+TemplateSubject = "fsaverage"
+TargetSFreq = 250
+
+Method = "eLORETA"
+SNR = 3.0
+Lambda2 = 1.0 / SNR**2
+
+# Choisir le contraste à afficher : "PN", "PG", ou "GN"
+PLOT_CONTRAST = "PN"
+
+# Purement cosmétique pour avoir des valeurs numériques lisibles dans le plot.
+# Ne change pas la topographie.
+SCALE_FACTOR = 1e13
+
+# Tu peux mettre ici 1, 2, 12 clusters, autant que tu veux.
+CLUSTERS = {
+    "Cluster1_320_988ms": (0.320, 0.988),
+    "Cluster2_2072_2628ms": (2.072, 2.628),
+}
+
+# IMPORTANT : pour rester cohérent avec l'ancien code qui faisait apparaître
+# le dACC, on utilise un seuil en percentiles par cluster, pas un seuil absolu
+# commun entre clusters.
+CLIM = dict(kind="percent", lims=[70, 85, 95])
+
+# =============================================================================
+# LOAD EVOKEDS
+# =============================================================================
+
+SubjectPathList = sorted([
+    s for s in os.listdir(SubjectPath)
+    if os.path.isdir(os.path.join(SubjectPath, s))
+])
+
+NeutralEvokeds = []
+GenericEvokeds = []
+PersonalizedEvokeds = []
+
+for Subject in SubjectPathList:
+
+    task_dir = os.path.join(SubjectPath, Subject, "Task")
+
+    neutral_path = os.path.join(
+        task_dir,
+        f"{Subject}_Stim10_200MSBaselined{Subject}-ave.fif"
+    )
+    generic_path = os.path.join(
+        task_dir,
+        f"{Subject}_Stim5_200MSBaselined{Subject}-ave.fif"
+    )
+    personalized_path = os.path.join(
+        task_dir,
+        f"{Subject}_Stim14_200MSBaselined{Subject}-ave.fif"
+    )
+
+    NeutralEvokeds.append(mne.read_evokeds(neutral_path)[0])
+    GenericEvokeds.append(mne.read_evokeds(generic_path)[0])
+    PersonalizedEvokeds.append(mne.read_evokeds(personalized_path)[0])
+
+ChannelOrder = NeutralEvokeds[0].ch_names
+
+for evoked_list in [NeutralEvokeds, GenericEvokeds, PersonalizedEvokeds]:
+    for ev in evoked_list:
+        ev.resample(TargetSFreq, npad="auto")
+        ev.crop(tmin=0.0, tmax=3.0, include_tmax=False)
+
+NeutralEvokeds = [
+    ev.copy().pick_channels(ChannelOrder, ordered=True)
+    for ev in NeutralEvokeds
+]
+GenericEvokeds = [
+    ev.copy().pick_channels(ChannelOrder, ordered=True)
+    for ev in GenericEvokeds
+]
+PersonalizedEvokeds = [
+    ev.copy().pick_channels(ChannelOrder, ordered=True)
+    for ev in PersonalizedEvokeds
+]
+
+# =============================================================================
+# MONTAGE + REFERENCE
+# =============================================================================
+
+Montage = mne.channels.make_standard_montage("easycap-M1")
+
+for evoked_list in [NeutralEvokeds, GenericEvokeds, PersonalizedEvokeds]:
+    for ev in evoked_list:
+        ev.set_montage(Montage, on_missing="warn")
+        ev.set_eeg_reference("average", projection=True)
+        ev.apply_proj()
+        
+for i, ev in enumerate(NeutralEvokeds + GenericEvokeds + PersonalizedEvokeds):
+    assert ev.ch_names == ChannelOrder, f"Channel order mismatch in evoked {i}"
+    assert len(ev.info["bads"]) == 0, f"Bad channels remain in evoked {i}: {ev.info['bads']}"
+
+# =============================================================================
+# FSAVERAGE / SOURCE SPACE / BEM / FORWARD
+# =============================================================================
+
+mne.datasets.fetch_fsaverage(subjects_dir=SubjectsDir)
+
+SourceSpace = mne.setup_source_space(
+    TemplateSubject,
+    spacing="oct6",
+    subjects_dir=SubjectsDir,
+    add_dist="patch"
+)
+
+BEMModel = mne.make_bem_model(
+    subject=TemplateSubject,
+    ico=4,
+    conductivity=(0.3, 0.006, 0.3),
+    subjects_dir=SubjectsDir
+)
+
+BEM = mne.make_bem_solution(BEMModel)
+
+fwd = mne.make_forward_solution(
+    info=NeutralEvokeds[0].info,
+    trans=TemplateSubject,
+    src=SourceSpace,
+    bem=BEM,
+    eeg=True,
+    meg=False,
+    mindist=5.0,
+    n_jobs=1
+)
+
+print("nchan evoked:", len(NeutralEvokeds[0].ch_names))
+print("nchan fwd:", fwd["nchan"])
+
+# =============================================================================
+# LOAD EPOCHS FOR NOISE COVARIANCE
+# =============================================================================
+
+NeutralEpochs = []
+GenericEpochs = []
+PersonalizedEpochs = []
+
+for Subject in SubjectPathList:
+
+    task_dir = os.path.join(SubjectPath, Subject, "Task")
+
+    neutral_matches = [
+        file for file in os.listdir(task_dir)
+        if "Stim10" in file
+        and "200MSBaselined" in file
+        and file.endswith("-epo.fif")
+    ]
+
+    generic_matches = [
+        file for file in os.listdir(task_dir)
+        if "Stim5" in file
+        and "200MSBaselined" in file
+        and file.endswith("-epo.fif")
+    ]
+
+    personalized_matches = [
+        file for file in os.listdir(task_dir)
+        if "Stim14" in file
+        and "200MSBaselined" in file
+        and file.endswith("-epo.fif")
+    ]
+
+    assert len(neutral_matches) == 1, (
+        f"{Subject}: {len(neutral_matches)} neutral epoch files found"
+    )
+    assert len(generic_matches) == 1, (
+        f"{Subject}: {len(generic_matches)} generic epoch files found"
+    )
+    assert len(personalized_matches) == 1, (
+        f"{Subject}: {len(personalized_matches)} personalized epoch files found"
+    )
+
+    NeutralEpochs.append(
+        mne.read_epochs(
+            os.path.join(task_dir, neutral_matches[0]),
+            preload=True
+        )
+    )
+
+    GenericEpochs.append(
+        mne.read_epochs(
+            os.path.join(task_dir, generic_matches[0]),
+            preload=True
+        )
+    )
+
+    PersonalizedEpochs.append(
+        mne.read_epochs(
+            os.path.join(task_dir, personalized_matches[0]),
+            preload=True
+        )
+    )
+    
+assert len(NeutralEpochs) == len(SubjectPathList), (
+    f"{len(NeutralEpochs)} neutral epoch files for "
+    f"{len(SubjectPathList)} subjects"
+)
+assert len(GenericEpochs) == len(SubjectPathList), (
+    f"{len(GenericEpochs)} generic epoch files for "
+    f"{len(SubjectPathList)} subjects"
+)
+assert len(PersonalizedEpochs) == len(SubjectPathList), (
+    f"{len(PersonalizedEpochs)} personalized epoch files for "
+    f"{len(SubjectPathList)} subjects"
+)
+
+NOISE_TMIN = -0.200
+NOISE_TMAX = 0.000
+
+for epochs_list in [NeutralEpochs, GenericEpochs, PersonalizedEpochs]:
+    for ep in epochs_list:
+        ep.resample(TargetSFreq, npad="auto")
+        ep.crop(tmin=NOISE_TMIN, tmax=NOISE_TMAX, include_tmax=False)
+        ep.pick(picks="eeg")
+        ep.pick_channels(ChannelOrder, ordered=True)
+        ep.set_montage(Montage, on_missing="warn")
+        ep.set_eeg_reference("average", projection=True)
+        ep.apply_proj()
+        assert ep.ch_names == ChannelOrder
+        assert len(ep.info["bads"]) == 0, f"Bad channels remain: {ep.info['bads']}"
+
+GlobalCovs = []
+
+for epN, epG, epP in zip(NeutralEpochs, GenericEpochs, PersonalizedEpochs):
+
+    ep_all = mne.concatenate_epochs([epN, epG, epP])
+
+    cov = mne.compute_covariance(
+        ep_all,
+        tmin=None,
+        tmax=None,
+        method="shrunk",
+        rank="info"
+        )
+
+    print("Sujet :", SubjectPathList[len(GlobalCovs)])
+    print("Rank epochs :", mne.compute_rank(ep_all, rank=None))
+    print("Rank covariance :", mne.compute_rank(cov, info=ep_all.info, rank=None))
+    print("Rank covariance (info) :", mne.compute_rank(cov, info=ep_all.info, rank="info"))
+
+    GlobalCovs.append(cov)
+
+print("N covariances:", len(GlobalCovs))
+
+assert len(GlobalCovs) == len(SubjectPathList)
+
+# =============================================================================
+# SOURCE RECONSTRUCTION
+# =============================================================================
+
+STC_PN = []
+STC_PG = []
+STC_GN = []
+
+for i, Subject in enumerate(SubjectPathList):
+
+    print("Source reconstruction:", Subject)
+
+    Evoked_N = NeutralEvokeds[i]
+    Evoked_G = GenericEvokeds[i]
+    Evoked_P = PersonalizedEvokeds[i]
+
+    noise_cov = GlobalCovs[i]
+
+    Inverse_Operator = make_inverse_operator(
+        Evoked_N.info,
+        fwd,
+        noise_cov,
+        loose=0.2,
+        depth=0.8
+    )
+
+    Evoked_PN = mne.combine_evoked([Evoked_P, Evoked_N], weights=[1, -1])
+    Evoked_PG = mne.combine_evoked([Evoked_P, Evoked_G], weights=[1, -1])
+    Evoked_GN = mne.combine_evoked([Evoked_G, Evoked_N], weights=[1, -1])
+
+    stc_PN = apply_inverse(
+        Evoked_PN,
+        Inverse_Operator,
+        Lambda2,
+        method=Method,
+        pick_ori="normal",
+        return_residual=False,
+        verbose=False
+    )
+    stc_PG = apply_inverse(
+        Evoked_PG,
+        Inverse_Operator,
+        Lambda2,
+        method=Method,
+        pick_ori="normal",
+        return_residual=False,
+        verbose=False
+    )
+    stc_GN = apply_inverse(
+        Evoked_GN,
+        Inverse_Operator,
+        Lambda2,
+        method=Method,
+        pick_ori="normal",
+        return_residual=False,
+        verbose=False
+    )
+
+    STC_PN.append(stc_PN)
+    STC_PG.append(stc_PG)
+    STC_GN.append(stc_GN)
+
+print("N subjects STC PN/PG/GN:", len(STC_PN), len(STC_PG), len(STC_GN))
+
+# =============================================================================
+# GROUP MEAN SOURCE
+# =============================================================================
+
+def grand_average_stc(stc_list):
+    stc_mean = stc_list[0].copy()
+    stc_mean._data = np.mean([stc.data for stc in stc_list], axis=0)
+    return stc_mean
+
+stc_PN_group_mean = grand_average_stc(STC_PN)
+stc_PG_group_mean = grand_average_stc(STC_PG)
+stc_GN_group_mean = grand_average_stc(STC_GN)
+
+contrast_dict = {
+    "PN": {
+        "stc": stc_PN_group_mean,
+        "label": "Personalized - Neutral"
+    },
+    "PG": {
+        "stc": stc_PG_group_mean,
+        "label": "Personalized - Generic"
+    },
+    "GN": {
+        "stc": stc_GN_group_mean,
+        "label": "Generic - Neutral"
+    }
+}
+
+stc_group = contrast_dict[PLOT_CONTRAST]["stc"]
+
+# =============================================================================
+# TEMPORAL AVERAGE FOR EACH CLUSTER
+# =============================================================================
+
+cluster_stcs = {}
+
+for cluster_name, (tmin, tmax) in CLUSTERS.items():
+
+    stc_window = stc_group.copy().crop(
+        tmin=tmin,
+        tmax=tmax,
+        include_tmax=False
+    ).mean()
+
+    # Scaling does not change topography.
+    stc_window._data = stc_window.data * SCALE_FACTOR
+
+    cluster_stcs[cluster_name] = {
+        "stc": stc_window,
+        "tmin": tmin,
+        "tmax": tmax
+    }
+
+    print("\n" + "=" * 80)
+    print(cluster_name, f"| {tmin:.3f}-{tmax:.3f} s")
+    print("STC min:", np.min(stc_window.data))
+    print("STC max:", np.max(stc_window.data))
+    print("STC abs max:", np.max(np.abs(stc_window.data)))
+    print("STC abs percentiles [80, 90, 97]:", np.percentile(np.abs(stc_window.data), [80, 90, 97]))
+
+
+# =============================================================================
+# PLOT FUNCTION : EXACTLY 5 PANELS, ONE ROW, NO DUPLICATES
+# =============================================================================
+
+def plot_cluster_stc_5views(stc_plot, cluster_name, tmin, tmax):
+    """
+    Plot exactly 5 views, concatenate them in one row, and save one PNG.
+
+    No ROI forcing. No abs transform. The plotted data are the real signed STC
+    for the selected contrast and time window.
+    """
+    from PIL import Image
+
+    panels = [
+        {"hemi": "rh", "view": "lat", "name": "01_RH_lateral"},
+        {"hemi": "lh", "view": "lat", "name": "02_LH_lateral"},
+        {"hemi": "both", "view": "dorsal", "name": "03_Dorsal"},
+        {"hemi": "lh", "view": "med", "name": "04_LH_medial"},
+        {"hemi": "rh", "view": "med", "name": "05_RH_medial"},
+    ]
+
+    panel_paths = []
+
+    for panel in panels:
+        panel_path = os.path.join(
+            FigureDir,
+            f"TMP_{PLOT_CONTRAST}_{cluster_name}_{panel['name']}.png"
+        )
+
+        brain = stc_plot.plot(
+            subject=TemplateSubject,
+            subjects_dir=SubjectsDir,
+            hemi=panel["hemi"],
+            views=[panel["view"]],
+            time_viewer=False,
+            size=(600, 500),
+            clim=CLIM,
+            colormap="mne",
+            colorbar=False,
+            background="black",
+            foreground="white",
+        )
+
+        brain.save_image(panel_path)
+        brain.close()
+        panel_paths.append(panel_path)
+
+    images = [Image.open(p).convert("RGB") for p in panel_paths]
+
+    widths, heights = zip(*(img.size for img in images))
+    total_width = sum(widths)
+    max_height = max(heights)
+
+    combined = Image.new("RGB", (total_width, max_height), color=(0, 0, 0))
+
+    x_offset = 0
+    for img in images:
+        combined.paste(img, (x_offset, 0))
+        x_offset += img.size[0]
+
+    output_path = os.path.join(
+        FigureDir,
+        f"SourceLoc_{PLOT_CONTRAST}_{cluster_name}_REAL_SIGNED_5views.png"
+    )
+
+    combined.save(output_path)
+
+    for img in images:
+        img.close()
+
+    for p in panel_paths:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+    print("Saved:", output_path)
+
+# =============================================================================
+# PLOT ALL SELECTED CLUSTERS
+# =============================================================================
+
+for cluster_name, item in cluster_stcs.items():
+
+    print("\nPlotting:", cluster_name)
+    print("Using clim:", CLIM)
+
+    plot_cluster_stc_5views(
+        stc_plot=item["stc"],
+        cluster_name=cluster_name,
+        tmin=item["tmin"],
+        tmax=item["tmax"]
+    )
+
+print("\nDone.")
