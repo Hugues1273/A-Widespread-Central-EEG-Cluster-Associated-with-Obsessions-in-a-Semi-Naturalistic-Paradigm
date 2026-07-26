@@ -1,0 +1,392 @@
+# -*- coding: utf-8 -*-
+
+import os
+import numpy as np
+import pandas as pd
+import mne
+from mne.minimum_norm import apply_inverse, make_inverse_operator
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+
+SubjectPath = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTRAWDATA"
+SubjectsDir = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/GlobalResults/SourceLocalization"
+OutputDir = "E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTCSV"
+
+os.makedirs(OutputDir, exist_ok=True)
+
+TargetSFreq = 250
+TemplateSubject = "fsaverage"
+
+Method = "eLORETA"
+SNR = 3.0
+Lambda2 = 1.0 / SNR**2
+
+# Temporal windows
+WINDOWS = {
+    "Cluster1_320_988ms": (0.320, 0.988),
+    "Cluster2_2072_2628ms": (2.072, 2.628),
+}
+
+# =============================================================================
+# LOAD EVOKEDS
+# =============================================================================
+
+SubjectPathList = sorted([
+    s for s in os.listdir(SubjectPath)
+    if os.path.isdir(os.path.join(SubjectPath, s))
+])
+
+NeutralEvokeds = []
+GenericEvokeds = []
+PersonalizedEvokeds = []
+
+for Subject in SubjectPathList:
+
+    task_dir = os.path.join(SubjectPath, Subject, "Task")
+
+    Files10Path = os.path.join(
+        task_dir,
+        f"{Subject}_Stim10_200MSBaselined{Subject}-ave.fif"
+    )
+    Files5Path = os.path.join(
+        task_dir,
+        f"{Subject}_Stim5_200MSBaselined{Subject}-ave.fif"
+    )
+    Files14Path = os.path.join(
+        task_dir,
+        f"{Subject}_Stim14_200MSBaselined{Subject}-ave.fif"
+    )
+
+    NeutralEvokeds.append(mne.read_evokeds(Files10Path)[0])
+    GenericEvokeds.append(mne.read_evokeds(Files5Path)[0])
+    PersonalizedEvokeds.append(mne.read_evokeds(Files14Path)[0])
+
+ChannelOrder = NeutralEvokeds[0].ch_names
+
+for evoked_list in [NeutralEvokeds, GenericEvokeds, PersonalizedEvokeds]:
+    for ev in evoked_list:
+        ev.resample(TargetSFreq, npad="auto")
+        ev.crop(tmin=0.0, tmax=3.0, include_tmax=False)
+
+NeutralEvokeds = [
+    ev.copy().pick_channels(ChannelOrder, ordered=True)
+    for ev in NeutralEvokeds
+]
+
+GenericEvokeds = [
+    ev.copy().pick_channels(ChannelOrder, ordered=True)
+    for ev in GenericEvokeds
+]
+
+PersonalizedEvokeds = [
+    ev.copy().pick_channels(ChannelOrder, ordered=True)
+    for ev in PersonalizedEvokeds
+]
+
+# =============================================================================
+# MONTAGE AND REFERENCE
+# =============================================================================
+
+Montage = mne.channels.make_standard_montage("easycap-M1")
+
+for evoked_list in [NeutralEvokeds, GenericEvokeds, PersonalizedEvokeds]:
+    for ev in evoked_list:
+        ev.set_montage(Montage, on_missing="warn")
+        ev.set_eeg_reference("average", projection=True)
+        ev.apply_proj()
+
+# =============================================================================
+# FETCH FSAVERAGE AND CREATE FORWARD MODEL
+# =============================================================================
+
+mne.datasets.fetch_fsaverage(subjects_dir=SubjectsDir)
+
+SourceSpace = mne.setup_source_space(
+    TemplateSubject,
+    spacing="oct6",
+    subjects_dir=SubjectsDir,
+    add_dist="patch"
+)
+
+BEMModel = mne.make_bem_model(
+    subject=TemplateSubject,
+    ico=4,
+    conductivity=(0.3, 0.006, 0.3),
+    subjects_dir=SubjectsDir
+)
+
+BEM = mne.make_bem_solution(BEMModel)
+
+fwd = mne.make_forward_solution(
+    info=NeutralEvokeds[0].info,
+    trans=TemplateSubject,
+    src=SourceSpace,
+    bem=BEM,
+    eeg=True,
+    meg=False,
+    mindist=5.0,
+    n_jobs=1
+)
+
+# =============================================================================
+# LOAD EPOCHS FOR NOISE COVARIANCE
+# =============================================================================
+
+NeutralEpochs = []
+GenericEpochs = []
+PersonalizedEpochs = []
+
+for Subject in SubjectPathList:
+
+    task_dir = os.path.join(SubjectPath, Subject, "Task")
+
+    neutral_matches = [
+        file for file in os.listdir(task_dir)
+        if "Stim10" in file
+        and "200MSBaselined" in file
+        and file.endswith("-epo.fif")
+    ]
+
+    generic_matches = [
+        file for file in os.listdir(task_dir)
+        if "Stim5" in file
+        and "200MSBaselined" in file
+        and file.endswith("-epo.fif")
+    ]
+
+    personalized_matches = [
+        file for file in os.listdir(task_dir)
+        if "Stim14" in file
+        and "200MSBaselined" in file
+        and file.endswith("-epo.fif")
+    ]
+
+    assert len(neutral_matches) == 1, (
+        f"{Subject}: {len(neutral_matches)} neutral epoch files found"
+    )
+
+    assert len(generic_matches) == 1, (
+        f"{Subject}: {len(generic_matches)} generic epoch files found"
+    )
+
+    assert len(personalized_matches) == 1, (
+        f"{Subject}: {len(personalized_matches)} personalized epoch files found"
+    )
+
+    NeutralEpochs.append(
+        mne.read_epochs(
+            os.path.join(task_dir, neutral_matches[0]),
+            preload=True
+        )
+    )
+
+    GenericEpochs.append(
+        mne.read_epochs(
+            os.path.join(task_dir, generic_matches[0]),
+            preload=True
+        )
+    )
+
+    PersonalizedEpochs.append(
+        mne.read_epochs(
+            os.path.join(task_dir, personalized_matches[0]),
+            preload=True
+        )
+    )
+
+for epochs_list in [NeutralEpochs, GenericEpochs, PersonalizedEpochs]:
+    for ep in epochs_list:
+        ep.resample(TargetSFreq, npad="auto")
+        ep.crop(tmin=-0.200, tmax=0.000, include_tmax=False)
+        ep.pick(picks="eeg")
+        ep.pick_channels(ChannelOrder, ordered=True)
+        ep.set_montage(Montage, on_missing="warn")
+        ep.set_eeg_reference("average", projection=True)
+        ep.apply_proj()
+        assert ep.ch_names == ChannelOrder
+        assert len(ep.info["bads"]) == 0, f"Bad channels remain: {ep.info['bads']}"
+
+GlobalCovs = []
+
+for epN, epG, epP in zip(NeutralEpochs, GenericEpochs, PersonalizedEpochs):
+
+    ep_all = mne.concatenate_epochs([epN, epG, epP])
+
+    cov = mne.compute_covariance(
+        ep_all,
+        tmin=None,
+        tmax=None,
+        method="shrunk",
+        rank="info"
+    )
+
+    GlobalCovs.append(cov)
+
+# =============================================================================
+# SOURCE RECONSTRUCTION: PERSONALIZED - NEUTRAL
+# =============================================================================
+
+STC_PN = []
+
+for i, Subject in enumerate(SubjectPathList):
+
+    Evoked_N = NeutralEvokeds[i]
+    Evoked_P = PersonalizedEvokeds[i]
+    noise_cov = GlobalCovs[i]
+
+    InverseOperator = make_inverse_operator(
+        Evoked_N.info,
+        fwd,
+        noise_cov,
+        loose=0.2,
+        depth=0.8
+    )
+
+    Evoked_PN = mne.combine_evoked(
+        [Evoked_P, Evoked_N],
+        weights=[1, -1]
+    )
+
+    stc_PN = apply_inverse(
+        Evoked_PN,
+        InverseOperator,
+        Lambda2,
+        method=Method,
+        pick_ori="normal",
+        return_residual=False,
+        verbose=False
+    )
+
+    STC_PN.append(stc_PN)
+
+print("Number of subjects with STC PN:", len(STC_PN))
+
+# =============================================================================
+# DEFINE SOURCE ROIs
+# =============================================================================
+
+labels = mne.read_labels_from_annot(
+    subject=TemplateSubject,
+    parc="aparc",
+    subjects_dir=SubjectsDir
+)
+
+dacc_labels = [
+    lab for lab in labels
+    if (
+        "caudalanteriorcingulate" in lab.name.lower()
+    )
+]
+
+pcc_labels = [
+    lab for lab in labels
+    if (
+        "posteriorcingulate" in lab.name.lower()
+    )
+]
+
+ROI_DICT = {
+    "PCC": pcc_labels,
+    "dACC": dacc_labels,
+}
+
+for roi_name, roi_labels in ROI_DICT.items():
+    print("\n", roi_name)
+    for lab in roi_labels:
+        print("  ", lab.name)
+
+# =============================================================================
+# ROI EXTRACTION FUNCTION
+# =============================================================================
+
+def extract_roi_mean(stc, roi_labels, src, tmin, tmax):
+    """
+    Extract mean source activity in a set of labels and a time window.
+    """
+
+    stc_crop = stc.copy().crop(
+    tmin=tmin,
+    tmax=tmax,
+    include_tmax=False
+    )
+
+    label_tc = mne.extract_label_time_course(
+        stcs=[stc_crop],
+        labels=roi_labels,
+        src=src,
+        mode="mean_flip",
+        return_generator=False
+    )
+
+    # Shape: n_stcs x n_labels x n_times
+    return float(np.mean(label_tc))
+
+# =============================================================================
+# BUILD LONG FORMAT CSV
+# =============================================================================
+
+rows = []
+
+for subj_idx, stc in enumerate(STC_PN):
+
+    subject_id = SubjectPathList[subj_idx]
+
+    for window_name, (tmin, tmax) in WINDOWS.items():
+
+        for roi_name, roi_labels in ROI_DICT.items():
+
+            mean_activity = extract_roi_mean(
+                stc=stc,
+                roi_labels=roi_labels,
+                src=SourceSpace,
+                tmin=tmin,
+                tmax=tmax
+            )
+
+            rows.append({
+                "subject": subject_id,
+                "contrast": "Personalized_minus_Neutral",
+                "window": window_name,
+                "roi": roi_name,
+                "tmin": tmin,
+                "tmax": tmax,
+                "mean_source_activity": mean_activity
+            })
+
+ROI_Window_df = pd.DataFrame(rows)
+
+OutputCSV = os.path.join(
+    OutputDir,
+    "source_ROI_PCC_dACC_cluster1_cluster2_long.csv"
+)
+
+ROI_Window_df.to_csv(OutputCSV, index=False)
+
+print("\nSaved long-format CSV to:")
+print(OutputCSV)
+print(ROI_Window_df.head())
+
+# =============================================================================
+# OPTIONAL: CREATE A WIDE CSV WITH PCC-dACC DOMINANCE INDEX
+# =============================================================================
+
+wide_df = ROI_Window_df.pivot_table(
+    index=["subject", "contrast", "window"],
+    columns="roi",
+    values="mean_source_activity"
+).reset_index()
+
+wide_df["PCC_minus_dACC"] = wide_df["PCC"] - wide_df["dACC"]
+
+OutputWideCSV = os.path.join(
+    OutputDir,
+    "source_ROI_PCCminusdACC_cluster1_cluster2_wide.csv"
+)
+
+wide_df.to_csv(OutputWideCSV, index=False)
+
+print("\nSaved wide-format CSV to:")
+print(OutputWideCSV)
+print(wide_df.head())
