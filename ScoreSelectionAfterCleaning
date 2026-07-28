@@ -1,0 +1,264 @@
+# -*- coding: utf-8 -*-
+
+import os
+import pandas as pd
+import mne
+
+print("I import the libraries")
+
+Subject = "ID"
+Path = f"E:/Ecrits/EEGSymptomProvocation/OCDEEG/MANUSCRIPTRAWDATA/{Subject}/Task"
+
+# =============================================================================
+# FIND ACTICHAMP FILE
+# =============================================================================
+
+FileList = os.listdir(Path)
+
+ScoreFile = None
+
+for File in FileList:
+    if "Actichamp" in File:
+        ScoreFile = File
+        break
+
+if ScoreFile is None:
+    raise FileNotFoundError("No Actichamp file found.")
+
+ScoreFilePath = os.path.join(Path, ScoreFile)
+
+# =============================================================================
+# READ ACTICHAMP FILE
+# =============================================================================
+
+print("I read the Actichamp score file")
+
+Score = pd.read_csv(ScoreFilePath, sep=r"\s+")
+
+Score = Score.reset_index()
+Score = Score.rename(columns={"index": "ActichampID"})
+Score["ScoreRow"] = range(len(Score))
+
+Score.to_csv(os.path.join(Path, "Score.csv"), index=False)
+
+print("Number of Actichamp rows:", len(Score))
+print(Score.head())
+print(Score.tail())
+
+print("\nPortValue counts in Actichamp:")
+print(Score["PortValueList"].value_counts(dropna=False))
+
+# =============================================================================
+# GENERATE KEPT EPOCHS DATAFRAME FROM FIF FILES
+# =============================================================================
+
+print("\nI generate the kept epochs dataframe from .fif files")
+
+KeptRows = []
+SelectedFiles = []
+
+for File in os.listdir(Path):
+
+    if "-epo.fif" not in File:
+        continue
+    
+    if "200MS" not in File:
+        continue
+
+    if "Stim5" not in File and "Stim10" not in File and "Stim14" not in File:
+        continue
+
+    if "Stim5" in File:
+        Stim = "Stim5"
+        Type = "Generic"
+        ExpectedPortValue = 85
+
+    elif "Stim10" in File:
+        Stim = "Stim10"
+        Type = "Neutral"
+        ExpectedPortValue = 170
+
+    elif "Stim14" in File:
+        Stim = "Stim14"
+        Type = "Personalized"
+        ExpectedPortValue = 254
+
+    SelectedFiles.append(File)
+
+    FilePath = os.path.join(Path, File)
+    Epochs = mne.read_epochs(FilePath, verbose="ERROR")
+
+    print("\nSelected file:", File)
+    print("Number of kept epochs:", len(Epochs))
+    print("First selections:", Epochs.selection[:10])
+    print("Last selections:", Epochs.selection[-10:])
+
+    for EpochID in Epochs.selection:
+     
+        ScoreRow = EpochID - 10
+
+        Matched = Score[Score["ScoreRow"] == ScoreRow]
+
+        if len(Matched) != 1:
+            raise ValueError(
+                f"No unique Actichamp match for EEG EpochID {EpochID}, "
+                f"ScoreRow {ScoreRow}, in file {File}. "
+                f"Match count = {len(Matched)}"
+            )
+
+        MatchedRow = Matched.iloc[0]
+
+        KeptRows.append({
+            "EpochID": int(EpochID),
+            "ScoreRow": ScoreRow,
+            "EEGFile": File,
+            "Stim": Stim,
+            "Type": Type,
+            "ExpectedPortValue": ExpectedPortValue,
+            "PictureScore": MatchedRow["PictureScore"],
+            "PictureIDList": MatchedRow["PictureIDList"],
+            "PortValueList": int(MatchedRow["PortValueList"]),
+            "ActichampID": int(MatchedRow["ActichampID"])
+        })
+
+if len(SelectedFiles) == 0:
+    raise RuntimeError("No target .fif files selected.")
+
+if len(KeptRows) == 0:
+    raise RuntimeError("No kept epochs found.")
+
+print("\nSelected FIF files:")
+for File in SelectedFiles:
+    print(File)
+
+KeptScore = pd.DataFrame(KeptRows)
+
+# =============================================================================
+# CHECK CONSISTENCY
+# =============================================================================
+
+print("\nNumber of kept EEG epochs:", len(KeptScore))
+
+print("\nCounts by EEGFile:")
+print(KeptScore["EEGFile"].value_counts())
+
+print("\nCounts by Stim:")
+print(KeptScore["Stim"].value_counts())
+
+print("\nCounts by Type:")
+print(KeptScore["Type"].value_counts())
+
+print("\nCounts by PortValueList:")
+print(KeptScore["PortValueList"].value_counts(dropna=False))
+
+print("\nNaN check:")
+print(KeptScore.isna().sum())
+
+print("\nCrosstab EEGFile x Stim:")
+print(pd.crosstab(
+    KeptScore["EEGFile"],
+    KeptScore["Stim"],
+    dropna=False
+))
+
+print("\nCrosstab Stim x PortValueList:")
+print(pd.crosstab(
+    KeptScore["Stim"],
+    KeptScore["PortValueList"],
+    dropna=False
+))
+
+# =============================================================================
+# CHECK PORTVALUE MATCHES STIM
+# =============================================================================
+
+KeptScore["PortValueMatchesStim"] = (
+    KeptScore["PortValueList"] == KeptScore["ExpectedPortValue"]
+)
+
+print("\nPortValueMatchesStim:")
+print(KeptScore["PortValueMatchesStim"].value_counts(dropna=False))
+
+Mismatches = KeptScore[KeptScore["PortValueMatchesStim"] == False]
+
+print("\nNumber of mismatches:", len(Mismatches))
+
+if len(Mismatches) > 0:
+    print("\nMismatches:")
+    print(Mismatches[
+        [
+            "EpochID",
+            "ScoreRow",
+            "EEGFile",
+            "Stim",
+            "Type",
+            "ExpectedPortValue",
+            "PortValueList",
+            "PictureScore",
+            "PictureIDList"
+        ]
+    ])
+
+    print("\nDetailed mismatch diagnostics:")
+
+    for _, row in Mismatches.iterrows():
+        score_row = row["ScoreRow"]
+
+        print("\n===================================")
+        print("EEGFile:", row["EEGFile"])
+        print("Stim:", row["Stim"])
+        print("EpochID:", row["EpochID"])
+        print("Current ScoreRow:", score_row)
+        print("Expected:", row["ExpectedPortValue"])
+        print("Found:", row["PortValueList"])
+
+        print("\nNearby Actichamp rows:")
+        print(
+            Score.loc[
+                max(0, score_row - 5): min(len(Score) - 1, score_row + 5),
+                ["ScoreRow", "PictureScore", "PictureIDList", "PortValueList"]
+            ]
+        )
+
+    raise RuntimeError("Mismatches detected. KeptScore.csv was not saved.")
+
+# =============================================================================
+# SAVE FINAL KEPT SCORE
+# =============================================================================
+
+KeptScore.to_csv(
+    os.path.join(Path, "KeptScore.csv"),
+    index=False
+)
+
+print("\nKeptScore.csv saved")
+
+# =============================================================================
+# FINAL CONSISTENCY CHECK
+# =============================================================================
+
+print("\n================ FINAL CONSISTENCY CHECK ================\n")
+
+FifCounts = {}
+
+for File in SelectedFiles:
+
+    FilePath = os.path.join(Path, File)
+    Epochs = mne.read_epochs(FilePath, verbose="ERROR")
+    FifCounts[File] = len(Epochs)
+
+print("Counts from selected FIF files:")
+print(FifCounts)
+
+print("\nCounts from KeptScore.csv by EEGFile:")
+print(KeptScore["EEGFile"].value_counts().to_dict())
+
+print("\nTotal FIF epochs:", sum(FifCounts.values()))
+print("Total CSV epochs:", len(KeptScore))
+
+if sum(FifCounts.values()) == len(KeptScore) and len(Mismatches) == 0:
+    print("\n🎯 PERFECT MATCH: CSV matches kept EEG epochs and Actichamp scores")
+else:
+    print("\n⚠️ MISMATCH DETECTED")
+
+print("\nDone.")
