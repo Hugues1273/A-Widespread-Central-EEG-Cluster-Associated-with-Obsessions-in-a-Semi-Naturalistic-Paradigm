@@ -1,0 +1,838 @@
+# =============================================================================
+# 1) IMPORTS
+# %%===========================================================================
+
+import os
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mne
+from scipy import stats
+from mne.channels import find_ch_adjacency
+from mne.stats import spatio_temporal_cluster_1samp_test
+
+
+# =============================================================================
+# 2) PARAMÈTRES À MODIFIER
+# %%===========================================================================
+
+General_Path = Path(
+    r"E:\Ecrits\EEGSymptomProvocation\OCDEEG\MANUSCRIPTRAWDATA"
+)
+
+Score_CSV_Path = Path(
+    r"E:\Ecrits\EEGSymptomProvocation\OCDEEG\MANUSCRIPTCSV"
+    r"\KeptScoreAllSubjects.csv"
+)
+# Trois fichiers déjà corrigés par une baseline de 200 ms sont chargés
+# pour chaque sujet, puis réunis avant le classement par PictureScore.
+# Exemples attendus pour AlexyDUVAL :
+# AlexyDUVAL_Stim5_200MSBaselinedAlexyDUVAL-epo.fif
+# AlexyDUVAL_Stim10_200MSBaselinedAlexyDUVAL-epo.fif
+# AlexyDUVAL_Stim14_200MSBaselinedAlexyDUVAL-epo.fif
+Stim_Codes_To_Load = [5, 10, 14]
+Epoch_File_Suffix = "-epo.fif"
+
+# Dans le CSV fourni, la colonne est nommée EpochID.
+# Si epochs.selection correspond plutôt à ActichampID, remplace par :
+# CSV_Epoch_ID_Column = "ActichampID"
+CSV_Epoch_ID_Column = "EpochID"
+Score_Column = "PictureScore"
+
+# -----------------------------------------------------------------------------
+# Classification intra-sujet
+# -----------------------------------------------------------------------------
+# Quartiles : 0.25 et 0.75
+# Médiane : 0.50 et 0.50
+# 20 % extrêmes : 0.20 et 0.80
+Low_Quantile = 0.25
+High_Quantile = 0.75
+
+# "inclusive" : score <= seuil bas et score >= seuil haut
+# "strict"    : score < seuil bas et score > seuil haut
+Threshold_Rule = "inclusive"
+
+Minimum_Trials_Per_Group = 5
+
+# None = toutes les conditions d'image sont utilisées.
+# Exemple : ["Stim5", "Stim10", "Stim14"]
+Valid_Stim_Labels = None
+Stim_Column = "Stim"
+
+# -----------------------------------------------------------------------------
+# EEG et statistiques
+# -----------------------------------------------------------------------------
+# None = toutes les électrodes EEG communes aux sujets.
+# Une liste limite LE TEST à ces électrodes.
+Test_Channels = None
+
+Test_Tmin = 0.0
+Test_Tmax = 3.0
+
+# Aucune baseline n'est appliquée ici : les fichiers chargés sont déjà
+# les fichiers 200MSBaselined.
+
+Alpha_Cluster_Forming = 0.05
+Alpha_Cluster = 0.05
+N_Permutations = 5000
+Tail = 0              # 0 bilatéral ; 1 fort > faible ; -1 fort < faible
+Seed = 1
+N_Jobs = -1
+
+# -----------------------------------------------------------------------------
+# Sorties
+# -----------------------------------------------------------------------------
+Output_Path = Path(
+    r"E:\Ecrits\EEGSymptomProvocation\OCDEEG\MANUSCRIPTCSV"
+)
+
+Trial_Classification_CSV = Output_Path / "Trial_Classification_By_Subject.csv"
+Subject_Summary_CSV = Output_Path / "Subject_Inclusion_Summary.csv"
+Cluster_Summary_CSV = Output_Path / "Significant_Cluster_Summary.csv"
+Automatic_ROI_CSV = Output_Path / "Subject_Mean_Values_By_Cluster.csv"
+Manual_ROI_CSV = Output_Path / "Subject_Mean_Values_Manual_ROI.csv"
+
+
+# =============================================================================
+# 3) VÉRIFICATION DES PARAMÈTRES
+# %%===========================================================================
+
+if not 0 <= Low_Quantile <= 1:
+    raise ValueError("Low_Quantile doit être compris entre 0 et 1.")
+
+if not 0 <= High_Quantile <= 1:
+    raise ValueError("High_Quantile doit être compris entre 0 et 1.")
+
+if Low_Quantile > High_Quantile:
+    raise ValueError("Low_Quantile ne peut pas dépasser High_Quantile.")
+
+if Threshold_Rule not in ["inclusive", "strict"]:
+    raise ValueError("Threshold_Rule doit être 'inclusive' ou 'strict'.")
+
+if Minimum_Trials_Per_Group < 1:
+    raise ValueError("Minimum_Trials_Per_Group doit être >= 1.")
+
+if Tail not in [-1, 0, 1]:
+    raise ValueError("Tail doit être -1, 0 ou 1.")
+
+# Crée le dossier de sortie s'il n'existe pas.
+Output_Path.mkdir(parents=True, exist_ok=True)
+
+# Le fichier de scores est global : il contient les essais de tous les sujets.
+if not Score_CSV_Path.is_file():
+    raise FileNotFoundError(
+        f"Fichier global des scores absent :\n{Score_CSV_Path}"
+    )
+
+All_Scores = pd.read_csv(Score_CSV_Path)
+
+Required_Global_Columns = [
+    "Subject",
+    CSV_Epoch_ID_Column,
+    Score_Column
+]
+Missing_Global_Columns = [
+    Column for Column in Required_Global_Columns
+    if Column not in All_Scores.columns
+]
+
+if Missing_Global_Columns:
+    raise RuntimeError(
+        f"Colonnes manquantes dans {Score_CSV_Path}: "
+        f"{Missing_Global_Columns}. "
+        f"Colonnes trouvées: {All_Scores.columns.tolist()}"
+    )
+
+All_Scores["Subject"] = All_Scores["Subject"].astype(str)
+
+print(f"Global score file loaded: {Score_CSV_Path}")
+print(f"Number of score rows: {len(All_Scores)}")
+print(f"Number of subjects in score file: {All_Scores['Subject'].nunique()}")
+
+
+# =============================================================================
+# 4) CHARGEMENT, ALIGNEMENT ET CLASSIFICATION DES ESSAIS
+# %%===========================================================================
+
+print("\nI load, align and classify trials within each subject")
+
+Subjects_List = sorted([
+    Subject
+    for Subject in os.listdir(General_Path)
+    if (General_Path / Subject).is_dir()
+    and Subject != Output_Path.name
+])
+
+Low_Evokeds_By_Subject = {}
+High_Evokeds_By_Subject = {}
+Trial_Classification_Rows = []
+Subject_Summary_Rows = []
+
+for Subject in Subjects_List:
+
+    Task_Path = General_Path / Subject / "Task"
+
+    if not Task_Path.is_dir():
+        print(f"WARNING: dossier Task absent pour {Subject}")
+        Subject_Summary_Rows.append({
+            "Subject": Subject,
+            "Included": False,
+            "Reason": "Task folder absent"
+        })
+        continue
+
+    Epoch_Files = []
+
+    for Stim_Code in Stim_Codes_To_Load:
+        Expected_File_Name = (
+            f"{Subject}_Stim{Stim_Code}_200MSBaselined"
+            f"{Subject}-epo.fif"
+        )
+        Expected_File_Path = Task_Path / Expected_File_Name
+
+        if not Expected_File_Path.is_file():
+            raise RuntimeError(
+                f"Fichier baseliné absent pour {Subject}:\n"
+                f"{Expected_File_Path}"
+            )
+
+        Epoch_Files.append(Expected_File_Path)
+
+    print("\n" + "=" * 80)
+    print(f"{Subject}: loading the three 200-ms-baselined epoch files")
+    print("=" * 80)
+
+    Epochs_By_Stim = []
+
+    for Stim_Code, Epoch_File in zip(Stim_Codes_To_Load, Epoch_Files):
+        print(f"Loading: {Epoch_File.name}")
+
+        Epochs_Stim = mne.read_epochs(
+            Epoch_File,
+            preload=True,
+            verbose=False
+        )
+
+        if Epochs_Stim.selection is None:
+            raise RuntimeError(
+                f"epochs.selection est absent dans {Epoch_File.name}."
+            )
+
+        Original_Epoch_IDs = np.asarray(
+            Epochs_Stim.selection,
+            dtype=int
+        )
+
+        if len(Original_Epoch_IDs) != len(Epochs_Stim):
+            raise RuntimeError(
+                f"{Subject}, Stim{Stim_Code}: "
+                "len(epochs.selection) != len(epochs)."
+            )
+
+        # On conserve explicitement les identifiants originaux avant la
+        # concaténation, car mne.concatenate_epochs reconstruit selection.
+        Epochs_Stim.metadata = pd.DataFrame({
+            "OriginalEpochID": Original_Epoch_IDs,
+            "LoadedStimCode": np.repeat(Stim_Code, len(Epochs_Stim))
+        })
+
+        Epochs_By_Stim.append(Epochs_Stim)
+
+    Epochs = mne.concatenate_epochs(
+        Epochs_By_Stim,
+        add_offset=False,
+        on_mismatch="raise",
+        verbose=False
+    )
+
+    print(f"Total concatenated epochs = {len(Epochs)}")
+    print("No baseline is applied: input files are already 200MSBaselined.")
+
+    # Sélectionne uniquement les lignes du sujet courant dans le CSV global.
+    Scores = All_Scores.loc[
+        All_Scores["Subject"] == str(Subject)
+    ].copy()
+
+    if Scores.empty:
+        print(f"WARNING: aucun score trouvé dans le CSV global pour {Subject}")
+        Subject_Summary_Rows.append({
+            "Subject": Subject,
+            "Included": False,
+            "Reason": "Subject absent from global score CSV"
+        })
+        continue
+
+    print(f"Number of score rows for {Subject} = {len(Scores)}")
+
+    Required_Columns = [CSV_Epoch_ID_Column, Score_Column]
+    Missing_Columns = [
+        Column for Column in Required_Columns
+        if Column not in Scores.columns
+    ]
+
+    if len(Missing_Columns) > 0:
+        raise RuntimeError(
+            f"Colonnes manquantes dans {Score_CSV_Path}: "
+            f"{Missing_Columns}. Colonnes trouvées: {Scores.columns.tolist()}"
+        )
+
+    Scores[CSV_Epoch_ID_Column] = pd.to_numeric(
+        Scores[CSV_Epoch_ID_Column], errors="raise"
+    ).astype(int)
+
+    Scores[Score_Column] = pd.to_numeric(
+        Scores[Score_Column], errors="coerce"
+    )
+
+    if Scores[CSV_Epoch_ID_Column].duplicated().any():
+        Duplicated_IDs = Scores.loc[
+            Scores[CSV_Epoch_ID_Column].duplicated(keep=False),
+            CSV_Epoch_ID_Column
+        ].tolist()
+
+        raise RuntimeError(
+            f"Identifiants dupliqués pour {Subject}: {Duplicated_IDs[:20]}"
+        )
+
+    if Valid_Stim_Labels is not None:
+        if Stim_Column not in Scores.columns:
+            raise RuntimeError(
+                f"La colonne {Stim_Column} est absente pour {Subject}."
+            )
+        Scores = Scores[
+            Scores[Stim_Column].astype(str).isin(
+                [str(Value) for Value in Valid_Stim_Labels]
+            )
+        ].copy()
+
+    if Epochs.metadata is None or "OriginalEpochID" not in Epochs.metadata.columns:
+        raise RuntimeError(
+            f"Les identifiants originaux n'ont pas été conservés pour {Subject}."
+        )
+
+    Epoch_Selection_IDs = Epochs.metadata[
+        "OriginalEpochID"
+    ].to_numpy(dtype=int)
+
+    Loaded_Stim_Codes = Epochs.metadata[
+        "LoadedStimCode"
+    ].to_numpy(dtype=int)
+
+    if len(Epoch_Selection_IDs) != len(Epochs):
+        raise RuntimeError(
+            f"{Subject}: nombre d'identifiants originaux différent "
+            "du nombre d'epochs concaténées."
+        )
+
+    Scores_Indexed = Scores.set_index(CSV_Epoch_ID_Column, drop=False)
+
+    Missing_Epoch_IDs = [
+        int(Epoch_ID)
+        for Epoch_ID in Epoch_Selection_IDs
+        if int(Epoch_ID) not in Scores_Indexed.index
+    ]
+
+    if len(Missing_Epoch_IDs) > 0:
+        Alternative_ID_Columns = [
+            Column
+            for Column in ["EpochID", "EpochsID", "ActichampID", "ScoreRow"]
+            if Column in Scores.columns
+            and Column != CSV_Epoch_ID_Column
+        ]
+
+        raise RuntimeError(
+            f"\nErreur d'alignement pour {Subject}.\n"
+            f"Colonne utilisée: {CSV_Epoch_ID_Column}\n"
+            f"Premiers IDs absents: {Missing_Epoch_IDs[:20]}\n"
+            f"Colonnes alternatives disponibles: {Alternative_ID_Columns}"
+        )
+
+    Aligned_Scores = Scores_Indexed.loc[Epoch_Selection_IDs].copy()
+    Aligned_Scores = Aligned_Scores.reset_index(drop=True)
+    Aligned_Scores["LocalEpochIndex"] = np.arange(len(Epochs), dtype=int)
+    Aligned_Scores["EpochSelectionID"] = Epoch_Selection_IDs
+    Aligned_Scores["LoadedStimCode"] = Loaded_Stim_Codes
+
+    Valid_Score_Mask = Aligned_Scores[Score_Column].notna().to_numpy()
+    Valid_Scores = Aligned_Scores.loc[Valid_Score_Mask, Score_Column]
+
+    if len(Valid_Scores) == 0:
+        print(f"WARNING: aucun score valide pour {Subject}")
+        Subject_Summary_Rows.append({
+            "Subject": Subject,
+            "Included": False,
+            "Reason": "No valid score"
+        })
+        continue
+
+    Low_Threshold = float(Valid_Scores.quantile(Low_Quantile))
+    High_Threshold = float(Valid_Scores.quantile(High_Quantile))
+
+    if Threshold_Rule == "inclusive":
+        Low_Mask = (
+            Valid_Score_Mask
+            & (Aligned_Scores[Score_Column].to_numpy() <= Low_Threshold)
+        )
+        High_Mask = (
+            Valid_Score_Mask
+            & (Aligned_Scores[Score_Column].to_numpy() >= High_Threshold)
+        )
+    else:
+        Low_Mask = (
+            Valid_Score_Mask
+            & (Aligned_Scores[Score_Column].to_numpy() < Low_Threshold)
+        )
+        High_Mask = (
+            Valid_Score_Mask
+            & (Aligned_Scores[Score_Column].to_numpy() > High_Threshold)
+        )
+
+    # Important lorsque Low_Quantile == High_Quantile et que plusieurs scores
+    # sont exactement égaux à la médiane : un essai ne doit pas être dans les
+    # deux groupes. Les essais en chevauchement sont exclus des deux groupes.
+    Overlap_Mask = Low_Mask & High_Mask
+
+    if np.any(Overlap_Mask):
+        Low_Mask[Overlap_Mask] = False
+        High_Mask[Overlap_Mask] = False
+
+    N_Low = int(Low_Mask.sum())
+    N_High = int(High_Mask.sum())
+
+    Trial_Group = np.full(len(Aligned_Scores), "Middle_or_excluded", dtype=object)
+    Trial_Group[Low_Mask] = "Low"
+    Trial_Group[High_Mask] = "High"
+    Trial_Group[Overlap_Mask] = "Threshold_overlap_excluded"
+    Trial_Group[~Valid_Score_Mask] = "Missing_score"
+
+    for Row_Index in range(len(Aligned_Scores)):
+        Output_Row = {
+            "Subject": Subject,
+            "LocalEpochIndex": int(Aligned_Scores.loc[Row_Index, "LocalEpochIndex"]),
+            "EpochSelectionID": int(Aligned_Scores.loc[Row_Index, "EpochSelectionID"]),
+            "CSV_ID_Column": CSV_Epoch_ID_Column,
+            "CSV_ID": int(Aligned_Scores.loc[Row_Index, CSV_Epoch_ID_Column]),
+            "PictureScore": Aligned_Scores.loc[Row_Index, Score_Column],
+            "LoadedStimCode": int(Aligned_Scores.loc[Row_Index, "LoadedStimCode"]),
+            "LowThreshold": Low_Threshold,
+            "HighThreshold": High_Threshold,
+            "Group": Trial_Group[Row_Index]
+        }
+
+        for Optional_Column in [
+            "Stim", "Type", "ActichampID", "EpochID", "ScoreRow"
+        ]:
+            if Optional_Column in Aligned_Scores.columns:
+                Output_Row[Optional_Column] = Aligned_Scores.loc[
+                    Row_Index, Optional_Column
+                ]
+
+        Trial_Classification_Rows.append(Output_Row)
+
+    print(f"Low threshold = {Low_Threshold:.3f}")
+    print(f"High threshold = {High_Threshold:.3f}")
+    print(f"N low trials = {N_Low}")
+    print(f"N high trials = {N_High}")
+
+    if N_Low < Minimum_Trials_Per_Group or N_High < Minimum_Trials_Per_Group:
+        print(f"WARNING: sujet exclu pour nombre insuffisant d'essais: {Subject}")
+        Subject_Summary_Rows.append({
+            "Subject": Subject,
+            "Included": False,
+            "Reason": "Insufficient trials",
+            "LowThreshold": Low_Threshold,
+            "HighThreshold": High_Threshold,
+            "NLow": N_Low,
+            "NHigh": N_High
+        })
+        continue
+
+    Low_Evoked = Epochs[Low_Mask].average()
+    High_Evoked = Epochs[High_Mask].average()
+
+    Low_Evokeds_By_Subject[Subject] = Low_Evoked
+    High_Evokeds_By_Subject[Subject] = High_Evoked
+
+    Subject_Summary_Rows.append({
+        "Subject": Subject,
+        "Included": True,
+        "Reason": "Included",
+        "LowThreshold": Low_Threshold,
+        "HighThreshold": High_Threshold,
+        "NLow": N_Low,
+        "NHigh": N_High,
+        "MeanLowScore": float(Aligned_Scores.loc[Low_Mask, Score_Column].mean()),
+        "MeanHighScore": float(Aligned_Scores.loc[High_Mask, Score_Column].mean())
+    })
+
+
+Trial_Classification = pd.DataFrame(Trial_Classification_Rows)
+Subject_Summary = pd.DataFrame(Subject_Summary_Rows)
+
+Trial_Classification.to_csv(Trial_Classification_CSV, index=False)
+Subject_Summary.to_csv(Subject_Summary_CSV, index=False)
+
+print(f"\nTrial classification saved to:\n{Trial_Classification_CSV}")
+print(f"Subject summary saved to:\n{Subject_Summary_CSV}")
+
+
+# =============================================================================
+# 5) CONSTRUCTION DES DEUX ERP PAR SUJET
+# %%===========================================================================
+
+Included_Subjects = sorted(
+    set(Low_Evokeds_By_Subject.keys())
+    & set(High_Evokeds_By_Subject.keys())
+)
+
+if len(Included_Subjects) < 2:
+    raise RuntimeError(
+        "Moins de deux sujets inclus. Le test inter-sujets est impossible."
+    )
+
+Low_Evokeds = [Low_Evokeds_By_Subject[S] for S in Included_Subjects]
+High_Evokeds = [High_Evokeds_By_Subject[S] for S in Included_Subjects]
+
+print("\nIncluded subjects:")
+print(Included_Subjects)
+print(f"N included subjects = {len(Included_Subjects)}")
+
+# Harmonisation des canaux entre sujets.
+if Test_Channels is None:
+    Common_Channels = set(Low_Evokeds[0].copy().pick("eeg").ch_names)
+
+    for Evoked in Low_Evokeds + High_Evokeds:
+        Common_Channels &= set(Evoked.copy().pick("eeg").ch_names)
+
+    Test_Channels_Final = [
+        Channel
+        for Channel in Low_Evokeds[0].copy().pick("eeg").ch_names
+        if Channel in Common_Channels
+    ]
+else:
+    Test_Channels_Final = list(Test_Channels)
+
+for Subject_Index, Subject in enumerate(Included_Subjects):
+    Missing_Low = [
+        Channel for Channel in Test_Channels_Final
+        if Channel not in Low_Evokeds[Subject_Index].ch_names
+    ]
+    Missing_High = [
+        Channel for Channel in Test_Channels_Final
+        if Channel not in High_Evokeds[Subject_Index].ch_names
+    ]
+
+    if len(Missing_Low) > 0 or len(Missing_High) > 0:
+        raise RuntimeError(
+            f"Canaux manquants pour {Subject}: "
+            f"low={Missing_Low}, high={Missing_High}"
+        )
+
+print(f"Number of tested EEG channels = {len(Test_Channels_Final)}")
+print("Tested channels:")
+print(Test_Channels_Final)
+
+# =============================================================================
+# 6) TEST DE PERMUTATION SPATIO-TEMPOREL INTER-SUJETS
+# %%===========================================================================
+
+print("\nI run the inter-subject paired spatio-temporal permutation test")
+
+X = []
+
+for Low_Evoked, High_Evoked in zip(Low_Evokeds, High_Evokeds):
+
+    Low_Selected = Low_Evoked.copy().pick(Test_Channels_Final)
+    High_Selected = High_Evoked.copy().pick(Test_Channels_Final)
+
+    Low_Selected.crop(tmin=Test_Tmin, tmax=Test_Tmax)
+    High_Selected.crop(tmin=Test_Tmin, tmax=Test_Tmax)
+
+    if not np.allclose(Low_Selected.times, High_Selected.times):
+        raise RuntimeError("Les axes temporels Low et High ne correspondent pas.")
+
+    # Une matrice High - Low par sujet.
+    X.append(High_Selected.data - Low_Selected.data)
+
+X = np.asarray(X)
+print("X shape before transpose (subjects, channels, times) =", X.shape)
+
+Evoked_Template = High_Evokeds[0].copy().pick(Test_Channels_Final)
+Evoked_Template.crop(tmin=Test_Tmin, tmax=Test_Tmax)
+
+Adjacency, Adjacency_Channel_Names = find_ch_adjacency(
+    Evoked_Template.info,
+    ch_type="eeg"
+)
+
+if Adjacency.shape[0] != len(Test_Channels_Final):
+    raise RuntimeError(
+        "La matrice d'adjacence ne correspond pas au nombre de canaux."
+    )
+
+X = np.transpose(X, (0, 2, 1))
+print("X shape for MNE (subjects, times, channels) =", X.shape)
+
+N_Subjects = X.shape[0]
+Degrees_Of_Freedom = N_Subjects - 1
+
+if Tail == 0:
+    T_Threshold = stats.t.ppf(
+        1 - Alpha_Cluster_Forming / 2,
+        Degrees_Of_Freedom
+    )
+else:
+    T_Threshold = stats.t.ppf(
+        1 - Alpha_Cluster_Forming,
+        Degrees_Of_Freedom
+    )
+
+print(
+    f"Cluster-forming threshold: t={T_Threshold:.3f}, "
+    f"df={Degrees_Of_Freedom}, tail={Tail}"
+)
+
+T_Observed, Clusters, Cluster_P_Values, H0 = (
+    spatio_temporal_cluster_1samp_test(
+        X,
+        adjacency=Adjacency,
+        n_permutations=N_Permutations,
+        threshold=T_Threshold,
+        tail=Tail,
+        n_jobs=N_Jobs,
+        seed=Seed,
+        out_type="mask",
+        verbose=True
+    )
+)
+
+Times = Evoked_Template.times
+Channel_Names = np.asarray(Evoked_Template.ch_names)
+Significant_Cluster_Indices = np.where(
+    Cluster_P_Values < Alpha_Cluster
+)[0]
+
+print("\nSTATISTICAL RESULTS")
+print("Minimum cluster p-value =", (
+    float(np.min(Cluster_P_Values))
+    if len(Cluster_P_Values) > 0 else np.nan
+))
+print("Number of significant clusters =", len(Significant_Cluster_Indices))
+
+
+# =============================================================================
+# 7) DESCRIPTION ET EXPORT DES CLUSTERS SIGNIFICATIFS
+# %%===========================================================================
+
+Cluster_Summary_Rows = []
+Automatic_ROI_Rows = []
+
+if len(Significant_Cluster_Indices) == 0:
+    print("No significant cluster found.")
+
+else:
+    for Cluster_Number, Cluster_Index in enumerate(
+        Significant_Cluster_Indices,
+        start=1
+    ):
+        Cluster_Mask = Clusters[Cluster_Index]
+        Cluster_P = float(Cluster_P_Values[Cluster_Index])
+
+        Time_Indices = np.where(np.any(Cluster_Mask, axis=1))[0]
+        Channel_Indices = np.where(np.any(Cluster_Mask, axis=0))[0]
+
+        Cluster_Tmin = float(Times[Time_Indices.min()])
+        Cluster_Tmax = float(Times[Time_Indices.max()])
+        Cluster_Channels = list(Channel_Names[Channel_Indices])
+
+        Masked_Absolute_T = np.abs(T_Observed) * Cluster_Mask
+        Peak_Time_Index, Peak_Channel_Index = np.unravel_index(
+            np.argmax(Masked_Absolute_T),
+            Masked_Absolute_T.shape
+        )
+
+        Peak_Time = float(Times[Peak_Time_Index])
+        Peak_Channel = str(Channel_Names[Peak_Channel_Index])
+        Peak_T = float(T_Observed[Peak_Time_Index, Peak_Channel_Index])
+
+        print("\n" + "=" * 80)
+        print(f"Significant cluster {Cluster_Number}")
+        print(f"MNE cluster index = {Cluster_Index}")
+        print(f"Cluster p-value = {Cluster_P:.4f}")
+        print(f"Time window = {Cluster_Tmin:.3f}–{Cluster_Tmax:.3f} s")
+        print(f"Number of electrodes = {len(Cluster_Channels)}")
+        print("Electrodes:")
+        print(", ".join(Cluster_Channels))
+        print(
+            f"Peak: {Peak_Time:.3f} s, {Peak_Channel}, "
+            f"t={Peak_T:.2f}"
+        )
+
+        Cluster_Summary_Rows.append({
+            "ClusterNumber": Cluster_Number,
+            "MNEClusterIndex": int(Cluster_Index),
+            "ClusterP": Cluster_P,
+            "Tmin_s": Cluster_Tmin,
+            "Tmax_s": Cluster_Tmax,
+            "NChannels": len(Cluster_Channels),
+            "Channels": ", ".join(Cluster_Channels),
+            "PeakTime_s": Peak_Time,
+            "PeakChannel": Peak_Channel,
+            "PeakT": Peak_T
+        })
+
+        # ---------------------------------------------------------------------
+        # ERP inter-sujets pour ce cluster
+        # ---------------------------------------------------------------------
+        Low_Subject_ERPs = []
+        High_Subject_ERPs = []
+
+        for Low_Evoked, High_Evoked in zip(Low_Evokeds, High_Evokeds):
+            Low_Subject_ERPs.append(
+                Low_Evoked.copy().pick(Cluster_Channels).data.mean(axis=0)
+            )
+            High_Subject_ERPs.append(
+                High_Evoked.copy().pick(Cluster_Channels).data.mean(axis=0)
+            )
+
+        Low_Subject_ERPs = np.asarray(Low_Subject_ERPs)
+        High_Subject_ERPs = np.asarray(High_Subject_ERPs)
+
+        Plot_Times = Low_Evokeds[0].times
+        Scale = 1_000_000
+
+        Low_Mean = Low_Subject_ERPs.mean(axis=0) * Scale
+        High_Mean = High_Subject_ERPs.mean(axis=0) * Scale
+
+        Low_SEM = (
+            Low_Subject_ERPs.std(axis=0, ddof=1)
+            / np.sqrt(N_Subjects)
+            * Scale
+        )
+        High_SEM = (
+            High_Subject_ERPs.std(axis=0, ddof=1)
+            / np.sqrt(N_Subjects)
+            * Scale
+        )
+
+        Figure, Axis = plt.subplots(figsize=(9, 5))
+        Axis.plot(Plot_Times, Low_Mean, label="Low anxiety")
+        Axis.plot(Plot_Times, High_Mean, label="High anxiety")
+        Axis.fill_between(
+            Plot_Times,
+            Low_Mean - Low_SEM,
+            Low_Mean + Low_SEM,
+            alpha=0.20
+        )
+        Axis.fill_between(
+            Plot_Times,
+            High_Mean - High_SEM,
+            High_Mean + High_SEM,
+            alpha=0.20
+        )
+        Axis.axvspan(Cluster_Tmin, Cluster_Tmax, alpha=0.15)
+        Axis.axvline(0, linestyle="--", linewidth=1)
+        Axis.set_xlabel("Time (s)")
+        Axis.set_ylabel("Amplitude (µV)")
+        Axis.set_title(
+            f"Cluster {Cluster_Number}: high vs low anxiety\n"
+            f"p={Cluster_P:.4f}; {Cluster_Tmin:.3f}–{Cluster_Tmax:.3f} s; "
+            f"n={N_Subjects}; {len(Cluster_Channels)} electrodes"
+        )
+        Axis.legend()
+        Figure.tight_layout()
+        plt.show()
+
+        # ---------------------------------------------------------------------
+        # Topomap moyenne High - Low sur la fenêtre du cluster
+        # ---------------------------------------------------------------------
+        Difference_Average = X.mean(axis=0)  # times x channels, volts
+        Topomap_Time_Mask = (
+            (Times >= Cluster_Tmin)
+            & (Times <= Cluster_Tmax)
+        )
+        Topomap_Data = Difference_Average[Topomap_Time_Mask, :].mean(axis=0)
+        Topomap_Data = Topomap_Data * Scale
+
+        Topomap_Channel_Mask = np.zeros(len(Channel_Names), dtype=bool)
+        Topomap_Channel_Mask[Channel_Indices] = True
+
+        Maximum_Absolute_Value = float(np.max(np.abs(Topomap_Data)))
+        Topomap_Limits = (
+            -Maximum_Absolute_Value,
+            Maximum_Absolute_Value
+        )
+
+        Figure, Axis = plt.subplots(figsize=(6, 6))
+        Image, _ = mne.viz.plot_topomap(
+            Topomap_Data,
+            Evoked_Template.info,
+            axes=Axis,
+            show=False,
+            cmap="RdBu_r",
+            vlim=Topomap_Limits,
+            contours=6,
+            sensors=True,
+            mask=Topomap_Channel_Mask,
+            mask_params=dict(
+                marker="o",
+                markerfacecolor="none",
+                markeredgecolor="black",
+                linewidth=2,
+                markersize=10
+            )
+        )
+        Figure.colorbar(Image, ax=Axis, shrink=0.75, label="High - Low (µV)")
+        Axis.set_title(
+            f"Cluster {Cluster_Number}: mean High - Low\n"
+            f"{Cluster_Tmin:.3f}–{Cluster_Tmax:.3f} s; p={Cluster_P:.4f}"
+        )
+        Figure.tight_layout()
+        plt.show()
+
+        # ---------------------------------------------------------------------
+        # Une valeur par sujet et par condition pour le CSV
+        # Moyenne sur toutes les électrodes du cluster et toute sa fenêtre.
+        # ---------------------------------------------------------------------
+        for Subject_Index, Subject in enumerate(Included_Subjects):
+            Low_Selected = (
+                Low_Evokeds[Subject_Index]
+                .copy()
+                .pick(Cluster_Channels)
+                .crop(tmin=Cluster_Tmin, tmax=Cluster_Tmax)
+            )
+            High_Selected = (
+                High_Evokeds[Subject_Index]
+                .copy()
+                .pick(Cluster_Channels)
+                .crop(tmin=Cluster_Tmin, tmax=Cluster_Tmax)
+            )
+
+            Low_Value_uV = float(Low_Selected.data.mean() * Scale)
+            High_Value_uV = float(High_Selected.data.mean() * Scale)
+
+            Automatic_ROI_Rows.append({
+                "Subject": Subject,
+                "ClusterNumber": Cluster_Number,
+                "ClusterP": Cluster_P,
+                "Tmin_s": Cluster_Tmin,
+                "Tmax_s": Cluster_Tmax,
+                "NChannels": len(Cluster_Channels),
+                "Channels": ", ".join(Cluster_Channels),
+                "Low_uV": Low_Value_uV,
+                "High_uV": High_Value_uV,
+                "HighMinusLow_uV": High_Value_uV - Low_Value_uV
+            })
+
+
+Cluster_Summary = pd.DataFrame(Cluster_Summary_Rows)
+Automatic_ROI_Values = pd.DataFrame(Automatic_ROI_Rows)
+
+Cluster_Summary.to_csv(Cluster_Summary_CSV, index=False)
+Automatic_ROI_Values.to_csv(Automatic_ROI_CSV, index=False)
+
+print(f"\nCluster summary saved to:\n{Cluster_Summary_CSV}")
+print(f"Automatic cluster values saved to:\n{Automatic_ROI_CSV}")
+
