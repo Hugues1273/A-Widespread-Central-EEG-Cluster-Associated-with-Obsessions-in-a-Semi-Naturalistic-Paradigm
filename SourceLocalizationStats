@@ -275,25 +275,47 @@ labels = mne.read_labels_from_annot(
 
 dacc_labels = [
     lab for lab in labels
-    if (
-        "caudalanteriorcingulate" in lab.name.lower()
-    )
+    if "caudalanteriorcingulate" in lab.name.lower()
 ]
 
 pcc_labels = [
     lab for lab in labels
+    if "posteriorcingulate" in lab.name.lower()
+]
+
+dlpfc_labels = [
+    lab for lab in labels
     if (
-        "posteriorcingulate" in lab.name.lower()
+        "rostralmiddlefrontal" in lab.name.lower()
+        or "caudalmiddlefrontal" in lab.name.lower()
+    )
+]
+
+itpj_labels = [
+    lab for lab in labels
+    if (
+        "inferiorparietal" in lab.name.lower()
+        or "supramarginal" in lab.name.lower()
     )
 ]
 
 ROI_DICT = {
     "PCC": pcc_labels,
     "dACC": dacc_labels,
+    "DLPFC": dlpfc_labels,
+    "ITPJ": itpj_labels,
 }
 
+# Check which FreeSurfer labels were selected
 for roi_name, roi_labels in ROI_DICT.items():
-    print("\n", roi_name)
+
+    print(f"\n{roi_name}: {len(roi_labels)} labels")
+
+    if len(roi_labels) == 0:
+        raise RuntimeError(
+            f"No FreeSurfer label was found for ROI {roi_name}."
+        )
+
     for lab in roi_labels:
         print("  ", lab.name)
 
@@ -359,7 +381,7 @@ ROI_Window_df = pd.DataFrame(rows)
 
 OutputCSV = os.path.join(
     OutputDir,
-    "source_ROI_PCC_dACC_cluster1_cluster2_long.csv"
+    "source_ROI_PCC_dACC_DLPFC_ITPJ_cluster1_cluster2_long.csv"
 )
 
 ROI_Window_df.to_csv(OutputCSV, index=False)
@@ -378,11 +400,21 @@ wide_df = ROI_Window_df.pivot_table(
     values="mean_source_activity"
 ).reset_index()
 
-wide_df["PCC_minus_dACC"] = wide_df["PCC"] - wide_df["dACC"]
+# Remove the name attached to the columns by pivot_table
+wide_df.columns.name = None
+
+# Prespecified ROI contrasts
+wide_df["PCC_minus_dACC"] = (
+    wide_df["PCC"] - wide_df["dACC"]
+)
+
+wide_df["DLPFC_minus_ITPJ"] = (
+    wide_df["DLPFC"] - wide_df["ITPJ"]
+)
 
 OutputWideCSV = os.path.join(
     OutputDir,
-    "source_ROI_PCCminusdACC_cluster1_cluster2_wide.csv"
+    "source_ROI_PCC_dACC_DLPFC_ITPJ_cluster1_cluster2_wide.csv"
 )
 
 wide_df.to_csv(OutputWideCSV, index=False)
