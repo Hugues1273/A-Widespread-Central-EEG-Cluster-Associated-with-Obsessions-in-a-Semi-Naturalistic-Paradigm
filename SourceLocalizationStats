@@ -225,17 +225,25 @@ for epN, epG, epP in zip(NeutralEpochs, GenericEpochs, PersonalizedEpochs):
     GlobalCovs.append(cov)
 
 # =============================================================================
-# SOURCE RECONSTRUCTION: PERSONALIZED - NEUTRAL
+# SOURCE RECONSTRUCTION FOR EACH CONDITION
 # =============================================================================
 
-STC_PN = []
+STC_BY_CONDITION = {
+    "Neutral": [],
+    "Generic": [],
+    "Personalized": [],
+}
 
 for i, Subject in enumerate(SubjectPathList):
 
-    Evoked_N = NeutralEvokeds[i]
-    Evoked_P = PersonalizedEvokeds[i]
     noise_cov = GlobalCovs[i]
 
+    Evoked_N = NeutralEvokeds[i]
+    Evoked_G = GenericEvokeds[i]
+    Evoked_P = PersonalizedEvokeds[i]
+
+    # The same inverse operator is used for all three conditions
+    # within a given subject.
     InverseOperator = make_inverse_operator(
         Evoked_N.info,
         fwd,
@@ -244,13 +252,8 @@ for i, Subject in enumerate(SubjectPathList):
         depth=0.8
     )
 
-    Evoked_PN = mne.combine_evoked(
-        [Evoked_P, Evoked_N],
-        weights=[1, -1]
-    )
-
-    stc_PN = apply_inverse(
-        Evoked_PN,
+    stc_N = apply_inverse(
+        Evoked_N,
         InverseOperator,
         Lambda2,
         method=Method,
@@ -259,9 +262,34 @@ for i, Subject in enumerate(SubjectPathList):
         verbose=False
     )
 
-    STC_PN.append(stc_PN)
+    stc_G = apply_inverse(
+        Evoked_G,
+        InverseOperator,
+        Lambda2,
+        method=Method,
+        pick_ori="normal",
+        return_residual=False,
+        verbose=False
+    )
 
-print("Number of subjects with STC PN:", len(STC_PN))
+    stc_P = apply_inverse(
+        Evoked_P,
+        InverseOperator,
+        Lambda2,
+        method=Method,
+        pick_ori="normal",
+        return_residual=False,
+        verbose=False
+    )
+
+    STC_BY_CONDITION["Neutral"].append(stc_N)
+    STC_BY_CONDITION["Generic"].append(stc_G)
+    STC_BY_CONDITION["Personalized"].append(stc_P)
+
+print("\nNumber of reconstructed subjects per condition:")
+
+for condition_name, stc_list in STC_BY_CONDITION.items():
+    print(f"  {condition_name}: {len(stc_list)}")
 
 # =============================================================================
 # DEFINE SOURCE ROIs
@@ -346,79 +374,165 @@ def extract_roi_mean(stc, roi_labels, src, tmin, tmax):
     return float(np.mean(label_tc))
 
 # =============================================================================
-# BUILD LONG FORMAT CSV
+# BUILD LONG-FORM CSV:
+# SUBJECT × CONDITION × WINDOW × ROI
 # =============================================================================
 
 rows = []
 
-for subj_idx, stc in enumerate(STC_PN):
+for condition_name, stc_list in STC_BY_CONDITION.items():
 
-    subject_id = SubjectPathList[subj_idx]
+    for subj_idx, stc in enumerate(stc_list):
 
-    for window_name, (tmin, tmax) in WINDOWS.items():
+        subject_id = SubjectPathList[subj_idx]
 
-        for roi_name, roi_labels in ROI_DICT.items():
+        for window_name, (tmin, tmax) in WINDOWS.items():
 
-            mean_activity = extract_roi_mean(
-                stc=stc,
-                roi_labels=roi_labels,
-                src=SourceSpace,
-                tmin=tmin,
-                tmax=tmax
-            )
+            for roi_name, roi_labels in ROI_DICT.items():
 
-            rows.append({
-                "subject": subject_id,
-                "contrast": "Personalized_minus_Neutral",
-                "window": window_name,
-                "roi": roi_name,
-                "tmin": tmin,
-                "tmax": tmax,
-                "mean_source_activity": mean_activity
-            })
+                mean_activity = extract_roi_mean(
+                    stc=stc,
+                    roi_labels=roi_labels,
+                    src=SourceSpace,
+                    tmin=tmin,
+                    tmax=tmax
+                )
+
+                rows.append({
+                    "subject": subject_id,
+                    "condition": condition_name,
+                    "window": window_name,
+                    "roi": roi_name,
+                    "tmin": tmin,
+                    "tmax": tmax,
+                    "mean_source_activity": mean_activity
+                })
 
 ROI_Window_df = pd.DataFrame(rows)
 
+# Explicit ordering
+condition_order = [
+    "Neutral",
+    "Generic",
+    "Personalized"
+]
+
+roi_order = [
+    "PCC",
+    "dACC",
+    "DLPFC",
+    "ITPJ"
+]
+
+window_order = list(WINDOWS.keys())
+
+ROI_Window_df["condition"] = pd.Categorical(
+    ROI_Window_df["condition"],
+    categories=condition_order,
+    ordered=True
+)
+
+ROI_Window_df["roi"] = pd.Categorical(
+    ROI_Window_df["roi"],
+    categories=roi_order,
+    ordered=True
+)
+
+ROI_Window_df["window"] = pd.Categorical(
+    ROI_Window_df["window"],
+    categories=window_order,
+    ordered=True
+)
+
+ROI_Window_df = (
+    ROI_Window_df
+    .sort_values(
+        by=["subject", "window", "condition", "roi"]
+    )
+    .reset_index(drop=True)
+)
+
 OutputCSV = os.path.join(
     OutputDir,
-    "source_ROI_PCC_dACC_DLPFC_ITPJ_cluster1_cluster2_long.csv"
+    "source_ROI_by_condition_and_cluster_long.csv"
 )
 
 ROI_Window_df.to_csv(OutputCSV, index=False)
 
 print("\nSaved long-format CSV to:")
 print(OutputCSV)
-print(ROI_Window_df.head())
+
+print("\nDimensions:")
+print(ROI_Window_df.shape)
+
+print("\nNumber of rows by condition, window and ROI:")
+print(
+    ROI_Window_df
+    .groupby(
+        ["condition", "window", "roi"],
+        observed=True
+    )
+    .size()
+)
+
+print("\nFirst rows:")
+print(ROI_Window_df.head(24))
 
 # =============================================================================
-# OPTIONAL: CREATE A WIDE CSV WITH PCC-dACC DOMINANCE INDEX
+# CREATE WIDE CSV:
+# ONE ROW PER SUBJECT × CONDITION × WINDOW
 # =============================================================================
 
 wide_df = ROI_Window_df.pivot_table(
-    index=["subject", "contrast", "window"],
+    index=[
+        "subject",
+        "condition",
+        "window",
+        "tmin",
+        "tmax"
+    ],
     columns="roi",
-    values="mean_source_activity"
+    values="mean_source_activity",
+    observed=True
 ).reset_index()
 
-# Remove the name attached to the columns by pivot_table
 wide_df.columns.name = None
 
-# Prespecified ROI contrasts
-wide_df["PCC_minus_dACC"] = (
-    wide_df["PCC"] - wide_df["dACC"]
-)
+# Reorder columns explicitly
+wide_df = wide_df[
+    [
+        "subject",
+        "condition",
+        "window",
+        "tmin",
+        "tmax",
+        "PCC",
+        "dACC",
+        "DLPFC",
+        "ITPJ"
+    ]
+]
 
-wide_df["DLPFC_minus_ITPJ"] = (
-    wide_df["DLPFC"] - wide_df["ITPJ"]
+wide_df = (
+    wide_df
+    .sort_values(
+        by=["subject", "window", "condition"]
+    )
+    .reset_index(drop=True)
 )
 
 OutputWideCSV = os.path.join(
     OutputDir,
-    "source_ROI_PCC_dACC_DLPFC_ITPJ_cluster1_cluster2_wide.csv"
+    "source_ROI_by_condition_and_cluster_wide.csv"
 )
 
 wide_df.to_csv(OutputWideCSV, index=False)
 
 print("\nSaved wide-format CSV to:")
 print(OutputWideCSV)
-print(wide_df.head())
+
+print("\nDimensions:")
+print(wide_df.shape)
+
+print("\nFirst rows:")
+print(wide_df.head(18))
